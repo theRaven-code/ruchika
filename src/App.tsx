@@ -6,7 +6,7 @@ const SkyViewer = lazy(() => import('./sky/SkyViewer').then((m) => ({ default: m
 
 const dedication: Dedication = {
   name: 'Ruchika',
-  caption: 'until your birthday · 14 December',
+  caption: 'counting every night until 14 December',
   celebration: { title: 'Happy Birthday', caption: '14 December' },
   verses: [
     'I may have forgotten your birthday many a times,',

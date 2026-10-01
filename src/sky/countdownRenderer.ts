@@ -69,7 +69,7 @@ export class CountdownRenderer {
       ctx.globalAlpha = alpha * 0.7
       ctx.shadowBlur = 8
       ctx.fillStyle = 'rgb(205, 218, 255)'
-      ctx.font = `italic 400 ${labelSize * 1.3}px ${FONT}`
+      ctx.font = `italic 400 ${labelSize * 1.05}px ${FONT}`
       ctx.letterSpacing = '0.5px'
       ctx.fillText(caption, x, y + labelSize * 4.6)
     }

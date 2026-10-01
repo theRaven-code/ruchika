@@ -1145,7 +1145,7 @@ export class SkyEngine {
     if (this.nameClock() < 4.5) return []
     const anchor = this.nameAnchor()
     if (!anchor) return []
-    const size = Math.min(16, Math.max(12, anchor.unitPx * 0.42))
+    const size = Math.min(13, Math.max(10, anchor.unitPx * 0.3))
     ctx.save()
     ctx.translate(anchor.x, anchor.y)
     ctx.rotate(anchor.angle)

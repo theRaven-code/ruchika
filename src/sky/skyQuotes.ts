@@ -1,19 +1,19 @@
 import { smoothstep } from './astro'
 
-/** Short notes on things you can actually see in this sky. */
+/** Sky notes folded together with how much she is loved. */
 export const SKY_QUOTES = [
-  'The Milky Way is our own galaxy, seen edge-on from inside it.',
-  'A shooting star is a grain of dust, burning up in the air.',
-  'Stars twinkle because the air above us is never still.',
-  'Planets shine steadier than stars. Their light is a tiny disc, not a point.',
-  'Moonlight is only sunlight, reflected off dust and stone.',
-  'Twilight is sunlight still scattered by the air after the Sun has set.',
-  'The constellations are pictures we agreed to see among the same stars.',
-  'A slow moving point of light is usually a satellite catching the Sun.',
-  'Airglow is the faint light the upper atmosphere makes all night.',
-  'The darker the sky, the more of the Milky Way you are allowed to see.',
-  'Meteor showers are Earth passing through the dust of an old comet.',
-  'Blue stars burn hotter. Red stars burn cooler.',
+  'I love you the way this sky holds the dark: quietly, and without an edge.',
+  'If I could hang one light for you, it would be a star that never sets.',
+  'The Milky Way is a river of suns. You are why I keep looking up.',
+  'A shooting star is a wish with a short life. Mine for you does not burn out.',
+  'Stars twinkle because the air is restless. My love for you is the still thing.',
+  'Moonlight is only borrowed sunlight. What I feel for you is my own.',
+  'I would count every star above Kamand if it brought your birthday closer.',
+  'Planets keep their course. So do I, love. Always back to you.',
+  'Twilight is the sky refusing to let go of the light. I know that feeling.',
+  'Some constellations are pictures. You are the one I actually believe in.',
+  'The darker the night, the more stars. The longer I know you, the more I love you.',
+  'Blue stars burn hot. Red stars burn long. I want the long kind, with you.',
 ]
 
 const FONT = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif'
