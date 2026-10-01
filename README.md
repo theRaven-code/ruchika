@@ -17,7 +17,9 @@ By default the page shows tonight's darkest sky (the least moonlit moment near
 countdown hanging underneath. The name is fixed to the stars, so it drifts and
 sets like a real constellation.
 
-- The opening shot rises from the Kamand ridges while the name is traced in.
+- The view starts away from the name. While five lines appear one at a time, the sky
+  turns toward her. Ruchika and the countdown appear only once that turn arrives,
+  and they stay on the same line if you look around afterwards.
 - The name's stars glint, and a wave of light runs through the letters every
   few seconds. Shooting stars fall now and then (only when the sky is dark).
 - The countdown rolls each digit like an odometer, with sparkles that pulse

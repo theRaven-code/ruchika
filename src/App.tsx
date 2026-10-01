@@ -8,6 +8,13 @@ const dedication: Dedication = {
   name: 'Ruchika',
   caption: 'until your birthday · 14 December',
   celebration: { title: 'Happy Birthday', caption: '14 December' },
+  verses: [
+    'I may have forgotten your birthday many a times,',
+    'But, love, the love I have for you has always grown stronger',
+    'This is a trailer to what is yet to come',
+    'Anticipating your birthday,',
+    "I've got nothing better to do but, count the stars",
+  ],
   countdown: () => {
     const state = getBirthdayState()
     if (state.kind === 'birthday') return null

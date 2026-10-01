@@ -86,7 +86,7 @@ function showDedication(engine: SkyEngine, dedication: Dedication, opening: bool
   engine.applyPreset('night')
   engine.setSpeed(1)
   engine.setDedication(dedication)
-  engine.presentName(az, alt, fov, opening ? { az: az - 10, alt: alt - 18, fov: fov + 14 } : undefined)
+  engine.presentName(az, alt, fov, opening ? { az: az + 78, alt: 6, fov } : undefined)
 }
 
 type SkyViewerProps = {

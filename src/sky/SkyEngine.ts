@@ -33,6 +33,8 @@ import { createBackground } from './layers/background'
 import { createBodies } from './layers/bodies'
 import { createConstellations, type ConstellationLabel } from './layers/constellations'
 import { createAzimuthalGrid, createEquatorialGrid } from './layers/grids'
+import { drawCelestialVerses, versePreludeSeconds } from './celestialVerses'
+import { drawSkyQuote, shuffledQuoteOrder, SKY_QUOTES } from './skyQuotes'
 import { CountdownRenderer, type CountdownPart } from './countdownRenderer'
 import { createLandscape } from './layers/landscape'
 import { createMeteors } from './layers/meteors'
@@ -83,6 +85,8 @@ export type Dedication = {
   /** Countdown units, or null once the day itself has arrived. */
   countdown: () => CountdownPart[] | null
   celebration: { title: string; caption: string }
+  /** Lines written into the landing sky, above the name. */
+  verses: string[]
 }
 
 type Flight = {
@@ -195,6 +199,11 @@ export class SkyEngine {
   private nameLayer: ReturnType<typeof createNameConstellation> | null = null
   private nameFrame: SkyFrame | null = null
   private nameRevealStart = 0
+  private versesSkipped = false
+  private nameDelay = 0
+  private pendingFocus: { at: number; az: number; alt: number; fov: number; duration: number } | null = null
+  private focusTarget: { az: number; alt: number; fov: number } | null = null
+  private quoteOrder = shuffledQuoteOrder(SKY_QUOTES.length)
   private nameBurstStart = -Infinity
   private nameVisible = false
   private flight: Flight | null = null
@@ -287,6 +296,7 @@ export class SkyEngine {
   /** Explore mode enables picking, cardinal points and planet labels. */
   setExploring(exploring: boolean) {
     this.exploring = exploring
+    if (exploring) this.skipVerses()
     if (!exploring) this.selection = null
     this.emitInfo(true)
   }
@@ -302,12 +312,19 @@ export class SkyEngine {
   presentName(az: number, alt: number, fov: number, from?: { az: number; alt: number; fov: number }) {
     if (from) this.lookAt(from.az, from.alt, from.fov)
     this.placeName(az, alt + 9, fov)
-    this.flyTo(az, alt, fov, { duration: from ? 3400 : undefined })
-    this.nextMeteorAt = performance.now() + 4500
+    const count = this.dedication?.verses.length ?? 0
+    const prelude = Math.max(1, versePreludeSeconds(count))
+    this.nameDelay = prelude
+    this.focusTarget = { az, alt, fov }
+    this.pendingFocus = null
+    // The sky turns the whole time the lines are read, and arrives as they end.
+    this.flyTo(az, alt, fov, { duration: prelude * 1000, swell: 10 })
+    this.nextMeteorAt = this.nameRevealStart + prelude * 1000
   }
 
   /** Swoops to the name, then sends a wave of light and a few meteors through it. */
   focusName(fov = this.fov) {
+    this.skipVerses(false)
     if (!this.nameFrame) return
     celestialToWorld(new Date(this.simTime), this.observer, this.toWorld)
     const world = framePoint(this.nameFrame, 0, 0).applyMatrix4(this.toWorld)
@@ -323,7 +340,7 @@ export class SkyEngine {
   }
 
   /** Smoothly turns the camera, pulling back slightly mid-flight. */
-  flyTo(az: number, alt: number, fov: number, options: { duration?: number; onDone?: () => void } = {}) {
+  flyTo(az: number, alt: number, fov: number, options: { duration?: number; swell?: number; onDone?: () => void } = {}) {
     const from = azAltToWorld(this.yaw / DEG, this.pitch / DEG)
     const to = azAltToWorld(az, alt)
     const angle = from.angleTo(to) / DEG
@@ -335,7 +352,7 @@ export class SkyEngine {
       to,
       fovFrom: this.fov,
       fovTo: Math.min(MAX_FOV, Math.max(MIN_FOV, fov)),
-      swell: Math.min(24, angle * 0.3 + 6),
+      swell: options.swell ?? Math.min(24, angle * 0.3 + 6),
       onDone: options.onDone,
     }
   }
@@ -380,6 +397,23 @@ export class SkyEngine {
     this.nameLayer.starUniforms.uMaxPointSize.value = this.maxPointSize
     this.nameRevealStart = performance.now()
     this.nameBurstStart = -Infinity
+    this.versesSkipped = false
+  }
+
+  /** Drops the lines and the waiting camera move. Optionally turns toward the name. */
+  private skipVerses(turnToName = true) {
+    this.versesSkipped = true
+    this.nameDelay = 0
+    const pending = this.pendingFocus
+    this.pendingFocus = null
+    const target = pending ?? this.focusTarget
+    if (turnToName && target) this.flyTo(target.az, target.alt, target.fov, { duration: 1800 })
+  }
+
+  /** Seconds since the name was allowed to appear. Negative while the lines still play. */
+  private nameClock() {
+    const elapsed = (performance.now() - this.nameRevealStart) / 1000
+    return elapsed - (this.versesSkipped || this.exploring ? 0 : this.nameDelay)
   }
 
   setLayers(layers: LayerState) {
@@ -609,6 +643,7 @@ export class SkyEngine {
   private tmp = new Vector3()
   private tmp2 = new Vector3()
   private screen = new Vector2()
+  private tmpScreen = new Vector2()
 
   private hiddenByLandscape(world: Vector3) {
     if (!this.layers.landscape) return false
@@ -710,6 +745,14 @@ export class SkyEngine {
     const dt = Math.min(100, now - this.lastFrame)
     this.lastFrame = now
     this.simTime += dt * this.speed
+
+    if (this.pendingFocus) this.velocity = { yaw: 0, pitch: 0 }
+
+    if (this.pendingFocus && now >= this.pendingFocus.at) {
+      const focus = this.pendingFocus
+      this.pendingFocus = null
+      this.flyTo(focus.az, focus.alt, focus.fov, { duration: focus.duration })
+    }
 
     if (this.pointers.size === 0 && (this.velocity.yaw || this.velocity.pitch)) {
       this.yaw += this.velocity.yaw * dt
@@ -880,7 +923,7 @@ export class SkyEngine {
    */
   private animateName(daylight: number, lineScale: number) {
     const now = performance.now()
-    const t = (now - this.nameRevealStart) / 1000
+    const t = this.nameClock()
     const burst = (now - this.nameBurstStart) / 1000
     let wave = -10
     let strength = 0
@@ -987,7 +1030,11 @@ export class SkyEngine {
     const marker = this.selectionWorld()
     const markerPoint = marker && this.project(marker, this.screen) ? this.screen.clone() : null
     this.updateNameVisibility()
-    this.labelLayer.draw(labels, markerPoint, (ctx) => this.drawCountdown(ctx))
+    this.labelLayer.draw(labels, markerPoint, (ctx) => [
+      ...this.drawCountdown(ctx),
+      ...this.drawSkyQuote(ctx),
+      ...this.drawVerses(ctx),
+    ])
   }
 
   private updateNameVisibility() {
@@ -1002,39 +1049,135 @@ export class SkyEngine {
     this.nameVisible = onScreen && inside && !this.hiddenByLandscape(world)
   }
 
-  /** Countdown hung in the sky under the name, screen-aligned, scaled with zoom. */
+  /**
+   * The name's center on screen, the on-screen height of the letters, and the
+   * angle of their baseline. Overlays are drawn in this frame so they stay on
+   * the same line as the letters instead of crossing them.
+   */
+  private nameAnchor() {
+    const frame = this.nameFrame
+    if (!frame || !this.layers.name) return null
+    const center = framePoint(frame, 0, 0).applyMatrix3(this.toWorld3)
+    if (this.hiddenByLandscape(center) || !this.project(center, this.screen)) return null
+    const x = this.screen.x
+    const y = this.screen.y
+    const right = framePoint(frame, 2, 0).applyMatrix3(this.toWorld3)
+    const top = framePoint(frame, 0, GLYPH_HEIGHT / 2).applyMatrix3(this.toWorld3)
+    if (!this.project(right, this.screen) || !this.project(top, this.tmpScreen)) return null
+    const half = Math.hypot(this.tmpScreen.x - x, this.tmpScreen.y - y)
+    if (half < 18) return null
+    return {
+      x,
+      y,
+      half,
+      unitPx: Math.hypot(this.screen.x - x, this.screen.y - y) / 2,
+      angle: Math.atan2(this.screen.y - y, this.screen.x - x),
+    }
+  }
+
+  /** Turns a rectangle drawn in the name's local frame back into screen space. */
+  private orientedRect(
+    anchor: { x: number; y: number; angle: number },
+    local: [number, number, number, number],
+  ): [number, number, number, number] {
+    const cos = Math.cos(anchor.angle)
+    const sin = Math.sin(anchor.angle)
+    const corners = [
+      [local[0], local[1]],
+      [local[2], local[1]],
+      [local[2], local[3]],
+      [local[0], local[3]],
+    ]
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const [px, py] of corners) {
+      const sx = anchor.x + px * cos - py * sin
+      const sy = anchor.y + px * sin + py * cos
+      minX = Math.min(minX, sx)
+      minY = Math.min(minY, sy)
+      maxX = Math.max(maxX, sx)
+      maxY = Math.max(maxY, sy)
+    }
+    return [minX, minY, maxX, maxY]
+  }
+
+  /** Countdown locked under the letters, on the same baseline as the name. */
   private drawCountdown(ctx: CanvasRenderingContext2D): [number, number, number, number][] {
     const frame = this.nameFrame
-    if (!frame || !this.dedication || !this.layers.name) return []
-    const t = (performance.now() - this.nameRevealStart) / 1000
+    if (!frame || !this.dedication) return []
+    const t = this.nameClock()
     const alpha = smoothstep(2.2, 4.2, t)
     if (alpha <= 0) return []
 
-    const world = framePoint(frame, 0, -GLYPH_HEIGHT / 2 - 3.8).applyMatrix3(this.toWorld3)
-    if (this.hiddenByLandscape(world) || !this.project(world, this.screen)) return []
-    const { x, y } = this.screen
-
-    const unitPx = (frame.unit * this.shared.uProjScale.value * this.height) / 4
-    const size = Math.min(100, Math.max(26, unitPx * 2.5))
+    const anchor = this.nameAnchor()
+    if (!anchor) return []
+    const size = Math.min(100, Math.max(26, anchor.unitPx * 2.5))
+    ctx.save()
+    ctx.translate(anchor.x, anchor.y)
+    ctx.rotate(anchor.angle)
     // A focus burst briefly brightens the countdown as the light wave passes.
     const burst = (performance.now() - this.nameBurstStart) / 1000
     const glow = burst >= 0 && burst < 2 ? 0.25 * Math.sin((Math.PI * burst) / 2) : 0
     const opacity = Math.min(1, alpha * (1 - 0.35 * (1 - this.darkness)) + glow)
     const now = performance.now()
     const parts = this.dedication.countdown()
+    const localY = anchor.half + size * 1.25
     const rect = parts
-      ? this.countdownRenderer.draw(ctx, x, y, size, parts, this.dedication.caption, opacity, now)
+      ? this.countdownRenderer.draw(ctx, 0, localY, size, parts, this.dedication.caption, opacity, now)
       : this.countdownRenderer.drawCelebration(
           ctx,
-          x,
-          y,
+          0,
+          localY,
           size * 1.1,
           this.dedication.celebration.title,
           this.dedication.celebration.caption,
           opacity,
           now,
         )
-    return [rect]
+    ctx.restore()
+    return [this.orientedRect(anchor, rect)]
+  }
+
+  /** A note about the sky, on the same line as the letters, just above them. */
+  private drawSkyQuote(ctx: CanvasRenderingContext2D): [number, number, number, number][] {
+    if (this.nameClock() < 4.5) return []
+    const anchor = this.nameAnchor()
+    if (!anchor) return []
+    const size = Math.min(16, Math.max(12, anchor.unitPx * 0.42))
+    ctx.save()
+    ctx.translate(anchor.x, anchor.y)
+    ctx.rotate(anchor.angle)
+    const rect = drawSkyQuote(
+      ctx,
+      SKY_QUOTES,
+      this.quoteOrder,
+      0,
+      -anchor.half - size * 3.4,
+      size,
+      Math.min(anchor.unitPx * 22, 520),
+      this.nameClock() - 4.5,
+    )
+    ctx.restore()
+    return rect ? [this.orientedRect(anchor, rect)] : []
+  }
+
+  /** Dedication lines, fixed to the screen and gone before the name appears. */
+  private drawVerses(ctx: CanvasRenderingContext2D): [number, number, number, number][] {
+    if (!this.dedication?.verses.length || this.exploring || this.versesSkipped) return []
+    const size = Math.min(27, Math.max(15, this.width / 46))
+    const maxWidth = Math.min(this.width * 0.9, 980)
+    const elapsed = (performance.now() - this.nameRevealStart) / 1000
+    return drawCelestialVerses(
+      ctx,
+      this.dedication.verses,
+      this.width / 2,
+      this.height * 0.4,
+      size,
+      maxWidth,
+      elapsed,
+    )
   }
 
   private azimuthalGridLabels(labels: Label[], font: string) {
