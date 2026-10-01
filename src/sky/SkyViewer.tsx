@@ -75,13 +75,18 @@ function formatSigned(deg: number) {
   return `${deg >= 0 ? '+' : '−'}${Math.abs(deg).toFixed(1)}°`
 }
 
-/** Tonight's darkest sky, running in real time, with the name written above the view. */
-function showDedication(engine: SkyEngine, dedication: Dedication) {
+/**
+ * Tonight's darkest sky, running in real time, with the name written above the
+ * view. The opening shot rises from the ridges; later returns glide over.
+ */
+function showDedication(engine: SkyEngine, dedication: Dedication, opening: boolean) {
+  const [az, alt] = PRESET_VIEWS.night!
+  const fov = defaultFov()
   engine.setExploring(false)
   engine.applyPreset('night')
   engine.setSpeed(1)
-  engine.lookAt(...PRESET_VIEWS.night!, defaultFov())
   engine.setDedication(dedication)
+  engine.presentName(az, alt, fov, opening ? { az: az - 10, alt: alt - 18, fov: fov + 14 } : undefined)
 }
 
 type SkyViewerProps = {
@@ -97,6 +102,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
   const [preset, setPreset] = useState<Preset | null>('night')
   const [exploring, setExploring] = useState(false)
+  const [curtain, setCurtain] = useState(false)
   const [showCredits, setShowCredits] = useState(false)
 
   useEffect(() => {
@@ -108,7 +114,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         created = new SkyEngine(containerRef.current, data)
         created.onInfo = setInfo
         created.setLayers(DEFAULT_LAYERS)
-        showDedication(created, dedication)
+        showDedication(created, dedication, true)
         setEngine(created)
         setStatus('ready')
       })
@@ -147,18 +153,24 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
     setExploring(true)
   }
 
+  // Dims the view briefly so the jump back to tonight's sky isn't abrupt.
   function backToName() {
     if (!engine) return
-    setExploring(false)
-    setLayers(DEFAULT_LAYERS)
-    setPreset('night')
-    setShowCredits(false)
-    showDedication(engine, dedication)
+    setCurtain(true)
+    window.setTimeout(() => {
+      setExploring(false)
+      setLayers(DEFAULT_LAYERS)
+      setPreset('night')
+      setShowCredits(false)
+      showDedication(engine, dedication, false)
+      setCurtain(false)
+    }, 380)
   }
 
   return (
     <div className="sky-viewer">
       <div ref={containerRef} className="sky-stage" />
+      <div className={curtain ? 'sky-curtain is-down' : 'sky-curtain'} aria-hidden="true" />
 
       {status !== 'ready' && (
         <div className="sky-loading" role="status">
@@ -185,9 +197,12 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
       {status === 'ready' && !exploring && (
         <div className="sky-intro">
           <span className="sky-intro__hint">Drag to look around</span>
-          {info && !info.nameVisible && (
-            <button onClick={() => engine?.lookAtName(defaultFov())}>Find {dedication.name}</button>
-          )}
+          <button
+            className={info && !info.nameVisible ? 'sky-intro__focus is-lost' : 'sky-intro__focus'}
+            onClick={() => engine?.focusName(defaultFov())}
+          >
+            <span aria-hidden="true">✦</span> Focus on {dedication.name}
+          </button>
           <button className="sky-intro__explore" onClick={startExploring}>
             Explore the sky
           </button>

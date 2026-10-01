@@ -19,12 +19,17 @@ attribute float aOrder;
 uniform vec2 uViewport;
 uniform float uWidth;
 uniform float uReveal;
+uniform float uGlowPos;
+uniform float uGlowStrength;
 varying float vEdge;
 varying float vReveal;
+varying float vGlow;
 ${PROJECT_GLSL}
 
 void main() {
   vReveal = clamp((uReveal - aOrder) * 25.0, 0.0, 1.0);
+  float g = (aOrder - uGlowPos) * 9.0;
+  vGlow = uGlowStrength * exp(-g * g);
   vec4 a = skyProject((modelViewMatrix * vec4(aStart, 1.0)).xyz);
   vec4 b = skyProject((modelViewMatrix * vec4(aEnd, 1.0)).xyz);
   if (a.z > 1.0 || b.z > 1.0) {
@@ -50,10 +55,12 @@ uniform float uOpacity;
 uniform float uWidth;
 varying float vEdge;
 varying float vReveal;
+varying float vGlow;
 
 void main() {
   float coverage = clamp(uWidth * 0.5 + 0.5 - abs(vEdge), 0.0, 1.0);
-  gl_FragColor = vec4(uColor, coverage * uOpacity * vReveal);
+  vec3 color = mix(uColor, vec3(1.0), min(vGlow, 1.0) * 0.6);
+  gl_FragColor = vec4(color, min(1.0, coverage * uOpacity * vReveal * (1.0 + vGlow)));
 }
 `
 
@@ -86,7 +93,7 @@ export type LineStyle = { color: string; opacity: number; width: number }
 
 /**
  * `order` (0..1 per segment) lets a figure be traced in over time by raising
- * the uReveal uniform from 0 to 1.
+ * the uReveal uniform from 0 to 1, and lets uGlowPos sweep light along it.
  */
 export function createLines(segments: number[], style: LineStyle, renderOrder: number, order?: number[]) {
   const count = segments.length / 6
@@ -124,6 +131,9 @@ export function createLines(segments: number[], style: LineStyle, renderOrder: n
     uColor: { value: new Color().setStyle(style.color, LinearSRGBColorSpace) },
     uOpacity: { value: style.opacity },
     uReveal: { value: 2 },
+    // A band of extra light at `uGlowPos` along aOrder, for shimmer effects.
+    uGlowPos: { value: -10 },
+    uGlowStrength: { value: 0 },
   }
   const material = new ShaderMaterial({
     uniforms,

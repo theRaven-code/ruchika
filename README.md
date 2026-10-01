@@ -15,7 +15,17 @@ npm run dev
 By default the page shows tonight's darkest sky (the least moonlit moment near
 22:00 IST) running in real time, with **RUCHIKA** written in stars and the
 countdown hanging underneath. The name is fixed to the stars, so it drifts and
-sets like a real constellation; "Find Ruchika" turns the view back to it.
+sets like a real constellation.
+
+- The opening shot rises from the Kamand ridges while the name is traced in.
+- The name's stars glint, and a wave of light runs through the letters every
+  few seconds. Shooting stars fall now and then (only when the sky is dark).
+- The countdown rolls each digit like an odometer, with sparkles that pulse
+  every second. It counts to **14 December, 00:00 IST** and rolls over to the
+  next year automatically; on the day itself it shows "Happy Birthday" with a
+  meteor shower.
+- "Focus on Ruchika" swoops the camera back to the name and sends a burst of
+  light and a few meteors through it.
 
 "Explore the sky" reveals the full controls; "Back to Ruchika" returns to the
 default view:
@@ -63,12 +73,10 @@ attribution to stay visible.
 To move the observer, change `OBSERVER` in `scripts/build-sky-data.mjs` and
 `src/sky/observer.ts`, then re-run `npm run sky:data`.
 
-## Update The Date
+## The Birthday Date
 
-The placeholder countdown target lives in `src/countdown.ts`:
+The date and the time zone it is counted in live in `src/countdown.ts`:
 
 ```ts
-export const birthdayTarget = '2027-01-01T00:00:00+06:30'
+export const birthday = { month: 12, day: 14, utcOffsetMinutes: 330 }
 ```
-
-Replace it when the real birthday date is ready.

@@ -1,19 +1,22 @@
 import { Suspense, lazy } from 'react'
-import { birthdayTarget, getCountdownParts } from './countdown'
+import { getBirthdayState } from './countdown'
 import type { Dedication } from './sky/SkyEngine'
 
 const SkyViewer = lazy(() => import('./sky/SkyViewer').then((m) => ({ default: m.SkyViewer })))
 
 const dedication: Dedication = {
   name: 'Ruchika',
-  caption: 'until the birthday',
+  caption: 'until your birthday · 14 December',
+  celebration: { title: 'Happy Birthday', caption: '14 December' },
   countdown: () => {
-    const parts = getCountdownParts(birthdayTarget)
+    const state = getBirthdayState()
+    if (state.kind === 'birthday') return null
+    const { days, hours, minutes, seconds } = state.parts
     return [
-      { value: parts.days, label: 'Days' },
-      { value: parts.hours, label: 'Hours' },
-      { value: parts.minutes, label: 'Min' },
-      { value: parts.seconds, label: 'Sec' },
+      { value: days, label: 'Days' },
+      { value: hours, label: 'Hours' },
+      { value: minutes, label: 'Minutes' },
+      { value: seconds, label: 'Seconds' },
     ]
   },
 }
