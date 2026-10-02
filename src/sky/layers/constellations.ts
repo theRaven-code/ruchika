@@ -8,6 +8,7 @@ import {
   LinearSRGBColorSpace,
   Matrix3,
   Mesh,
+  NoColorSpace,
   ShaderMaterial,
   TextureLoader,
   Vector3,
@@ -19,10 +20,20 @@ import { arcSegments, createLines } from './lines'
 
 const artVertex = /* glsl */ `
 varying vec2 vUv;
+varying float vFront;
 ${PROJECT_GLSL}
 void main() {
   vUv = uv;
-  gl_Position = skyProject((modelViewMatrix * vec4(position, 1.0)).xyz);
+  vec3 viewPos = (modelViewMatrix * vec4(position, 1.0)).xyz;
+  vec3 d = normalize(viewPos);
+  // Stereographic projection blows up behind the camera. Park those
+  // vertices so they cannot smear a constellation across the whole sky.
+  vFront = step(d.z, 0.12);
+  if (d.z > 0.12) {
+    gl_Position = vec4(d.x / max(uAspect, 1e-5), d.y, 2.0, 1.0);
+    return;
+  }
+  gl_Position = skyProject(viewPos);
 }
 `
 
@@ -31,8 +42,11 @@ uniform sampler2D uMap;
 uniform vec3 uTint;
 uniform float uOpacity;
 varying vec2 vUv;
+varying float vFront;
 void main() {
+  if (vFront < 0.5) discard;
   float v = texture2D(uMap, vUv).r;
+  if (v < 0.03) discard;
   gl_FragColor = vec4(uTint * v * uOpacity, 1.0);
 }
 `
@@ -107,7 +121,7 @@ export function createConstellations(
   const art = new Group()
   const artUniforms = {
     uTint: { value: new Color().setStyle('#c9d6ff', LinearSRGBColorSpace) },
-    uOpacity: { value: 0.42 },
+    uOpacity: { value: 0.72 },
   }
   let artLoaded = false
 
@@ -121,6 +135,8 @@ export function createConstellations(
       if (!geometry) continue
       loader.load(skyAsset(`art/${c.image.file}`), (texture) => {
         texture.anisotropy = 4
+        // Grayscale intensity plates; sRGB decode was crushing them to black.
+        texture.colorSpace = NoColorSpace
         const material = new ShaderMaterial({
           uniforms: { ...sharedProjection, ...artUniforms, uMap: { value: texture } },
           vertexShader: artVertex,
@@ -129,6 +145,7 @@ export function createConstellations(
           depthTest: false,
           depthWrite: false,
           blending: AdditiveBlending,
+          toneMapped: false,
           side: DoubleSide,
         })
         const mesh = new Mesh(geometry, material)

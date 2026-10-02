@@ -999,7 +999,7 @@ export class SkyEngine {
     this.overlayFade = 1 - 0.85 * daylight
     this.constellations.lines.uniforms.uOpacity.value = 0.6 * this.overlayFade
     // Additive art washes out over a bright twilight sky, so it follows sky darkness.
-    this.constellations.artUniforms.uOpacity.value = 0.42 * (0.25 + 0.75 * smoothstep(2.5, 6, skyLimit))
+    this.constellations.artUniforms.uOpacity.value = 0.72 * (0.35 + 0.65 * smoothstep(2.5, 6, skyLimit))
     this.azGrid.uniforms.uOpacity.value = 0.55 * (1 - 0.35 * daylight)
     this.eqGrid.uniforms.uOpacity.value = 0.55 * (1 - 0.35 * daylight)
 
