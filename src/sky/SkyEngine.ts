@@ -196,7 +196,8 @@ export class SkyEngine {
   private resizeObserver: ResizeObserver
   private exploring = false
   private dedication: Dedication | null = null
-  private nameLayer: ReturnType<typeof createNameConstellation> | null = null
+  private nameLayers: ReturnType<typeof createNameConstellation>[] = []
+  private nameWeights = [1, 0]
   private nameFrame: SkyFrame | null = null
   private nameRevealStart = 0
   private versesSkipped = false
@@ -363,14 +364,14 @@ export class SkyEngine {
    * stars afterwards, so it rises and sets like a constellation.
    */
   private placeName(az: number, alt: number, fov: number) {
-    if (this.nameLayer) {
-      this.celestial.remove(this.nameLayer.stars, this.nameLayer.lines.mesh)
-      this.nameLayer.stars.geometry.dispose()
-      this.nameLayer.lines.mesh.geometry.dispose()
-      ;(this.nameLayer.stars.material as ShaderMaterial).dispose()
-      ;(this.nameLayer.lines.mesh.material as ShaderMaterial).dispose()
-      this.nameLayer = null
+    for (const layer of this.nameLayers) {
+      this.celestial.remove(layer.stars, layer.lines.mesh)
+      layer.stars.geometry.dispose()
+      layer.lines.mesh.geometry.dispose()
+      ;(layer.stars.material as ShaderMaterial).dispose()
+      ;(layer.lines.mesh.material as ShaderMaterial).dispose()
     }
+    this.nameLayers = []
     if (!this.dedication) return
 
     celestialToWorld(new Date(this.simTime), this.observer, this.toWorld)
@@ -389,12 +390,19 @@ export class SkyEngine {
       right: rightWorld.applyMatrix3(toEqj),
       unit: width / Math.max(1, layoutName(this.dedication.name).width),
     }
-    this.nameLayer = createNameConstellation(this.dedication.name, this.nameFrame)
-    this.nameLayer.stars.visible = this.layers.name
-    this.nameLayer.lines.mesh.visible = this.layers.name
-    this.celestial.add(this.nameLayer.stars, this.nameLayer.lines.mesh)
+    // Same letter height and the same patch of sky. Marathi and Tamil are
+    // naturally a little narrower than the English star-letters.
+    this.nameLayers = [this.dedication.name, 'ΡΟΥΧΙΚΑ'].map((script) =>
+      createNameConstellation(script, this.nameFrame!),
+    )
+    for (const layer of this.nameLayers) {
+      layer.stars.visible = this.layers.name
+      layer.lines.mesh.visible = this.layers.name
+      layer.starUniforms.uMaxPointSize.value = this.maxPointSize
+      this.celestial.add(layer.stars, layer.lines.mesh)
+    }
+    this.nameWeights = [1, 0]
     this.shareUniforms()
-    this.nameLayer.starUniforms.uMaxPointSize.value = this.maxPointSize
     this.nameRevealStart = performance.now()
     this.nameBurstStart = -Infinity
     this.versesSkipped = false
@@ -418,9 +426,9 @@ export class SkyEngine {
 
   setLayers(layers: LayerState) {
     this.layers = { ...layers }
-    if (this.nameLayer) {
-      this.nameLayer.stars.visible = layers.name
-      this.nameLayer.lines.mesh.visible = layers.name
+    for (const layer of this.nameLayers) {
+      layer.stars.visible = layers.name
+      layer.lines.mesh.visible = layers.name
     }
     this.constellations.lines.mesh.visible = layers.constellations
     this.constellations.art.visible = layers.art
@@ -913,7 +921,7 @@ export class SkyEngine {
     for (const lines of this.lineMeshes) lines.uniforms.uWidth.value = lines.baseWidth * lineScale
 
     this.darkness = layers.atmosphere ? smoothstep(2.5, 5, skyLimit) : 1
-    if (this.nameLayer) this.animateName(daylight, lineScale)
+    if (this.nameLayers.length) this.animateName(daylight, lineScale)
   }
 
   /**
@@ -936,17 +944,36 @@ export class SkyEngine {
       strength = cycle < 3 ? 0.9 : 0
     }
 
-    const stars = this.nameLayer!.starUniforms
-    stars.uFade.value = smoothstep(0, 1.6, t)
-    stars.uWave.value = wave
-    stars.uWaveStrength.value = strength
+    this.updateNameCycle(t)
+    this.nameLayers.forEach((layer, index) => {
+      const weight = this.nameWeights[index] ?? 0
+      const stars = layer.starUniforms
+      stars.uFade.value = smoothstep(0, 1.6, index === 0 ? t : 4) * weight
+      stars.uWave.value = wave
+      stars.uWaveStrength.value = weight > 0.65 ? strength : 0
+      const lines = layer.lines
+      lines.uniforms.uReveal.value = index === 0 ? Math.min(2, Math.max(0, (t - 1.2) / 3.2)) : 2
+      lines.uniforms.uWidth.value = lines.baseWidth * lineScale
+      lines.uniforms.uOpacity.value = (0.42 + 0.05 * Math.sin(Math.max(t, 0) * 0.9)) * (1 - 0.6 * daylight) * weight
+      lines.uniforms.uGlowPos.value = wave
+      lines.uniforms.uGlowStrength.value = weight > 0.65 ? strength * 1.4 : 0
+    })
+  }
 
-    const lines = this.nameLayer!.lines
-    lines.uniforms.uReveal.value = Math.min(2, Math.max(0, (t - 1.2) / 3.2))
-    lines.uniforms.uWidth.value = lines.baseWidth * lineScale
-    lines.uniforms.uOpacity.value = (0.38 + 0.05 * Math.sin(t * 0.9)) * (1 - 0.6 * daylight)
-    lines.uniforms.uGlowPos.value = wave
-    lines.uniforms.uGlowStrength.value = strength * 1.4
+  /** English star-letters, then her name in Greek, the script of that sky science. */
+  private updateNameCycle(t: number) {
+    if (t < 5.4) {
+      this.nameWeights = [1, 0]
+      return
+    }
+    const slot = 7
+    const local = (t - 5.4) % (slot * 2)
+    const index = Math.floor(local / slot)
+    const blend = smoothstep(0.82, 1, (local % slot) / slot)
+    const weights = [0, 0]
+    weights[index] = 1 - blend
+    weights[(index + 1) % 2] += blend
+    this.nameWeights = weights
   }
 
   private drawLabels() {

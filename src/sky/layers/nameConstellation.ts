@@ -90,8 +90,8 @@ void main() {
 `
 
 /** The name drawn as an asterism: sparkling stars joined by soft starlight lines. */
-export function createNameConstellation(text: string, frame: SkyFrame) {
-  const layout = layoutName(text)
+export function createNameConstellation(text: string, frame: SkyFrame, targetWidth?: number) {
+  const layout = layoutName(text, targetWidth)
   const n = layout.stars.length
   const points3d = layout.stars.map((s) => framePoint(frame, s.x, s.y))
 

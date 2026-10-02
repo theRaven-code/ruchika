@@ -4,6 +4,8 @@ type Glyph = {
   stars: [number, number][]
   /** Stick-figure lines as paths through star indices. */
   paths: number[][]
+  /** Pull the headline across to the next letter, for Devanagari. */
+  join?: boolean
 }
 
 const O_STARS: [number, number][] = [
@@ -59,20 +61,38 @@ const GLYPHS: Record<string, Glyph> = {
   Z: { width: 3.2, stars: [[0, 6], [3.2, 6], [0, 0], [3.2, 0]], paths: [[0, 1, 2, 3]] },
   ' ': { width: 2.2, stars: [], paths: [] },
 }
+/** Greek capitals that share a star-figure with a Latin letter. */
+const GREEK_SHAPE: Record<string, string> = {
+  Α: 'A',
+  Ρ: 'P',
+  Ο: 'O',
+  Υ: 'Y',
+  Χ: 'X',
+  Ι: 'I',
+  Κ: 'K',
+}
 
 const LETTER_GAP = 1.3
 export const GLYPH_HEIGHT = 6
 
 export type NameStar = { x: number; y: number; mag: number; bv: number }
 
+function letterClusters(text: string) {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  return [...segmenter.segment(text)].map((part) => part.segment)
+}
+
 /** Lays out text as star figures, centred on (0, 0), in glyph units. */
-export function layoutName(text: string) {
+export function layoutName(text: string, targetWidth?: number) {
   const stars: NameStar[] = []
   const paths: number[][] = []
   let x = 0
-  for (const ch of text.toUpperCase()) {
-    const glyph = GLYPHS[ch]
+  let previousJoined = false
+  for (const cluster of letterClusters(text)) {
+    const key = cluster.toUpperCase()
+    const glyph = GLYPHS[cluster] ?? GLYPHS[key] ?? GLYPHS[GREEK_SHAPE[cluster] ?? '']
     if (!glyph) continue
+    if (x > 0) x += glyph.join && previousJoined ? 0.15 : LETTER_GAP
     const base = stars.length
     const ends = new Set(glyph.paths.flatMap((p) => [p[0], p.at(-1)!]))
     glyph.stars.forEach(([sx, sy], i) => {
@@ -81,12 +101,14 @@ export function layoutName(text: string) {
       stars.push({ x: x + sx, y: sy, mag: 1.5 + 1.4 * r1 - (ends.has(i) ? 0.4 : 0), bv: -0.1 + 0.7 * r2 })
     })
     glyph.paths.forEach((p) => paths.push(p.map((i) => base + i)))
-    x += glyph.width + LETTER_GAP
+    x += glyph.width
+    previousJoined = glyph.join === true
   }
-  const width = Math.max(0, x - LETTER_GAP)
+  const width = Math.max(x, 1)
+  const scale = targetWidth ? targetWidth / width : 1
   for (const s of stars) {
-    s.x -= width / 2
-    s.y -= GLYPH_HEIGHT / 2
+    s.x = (s.x - width / 2) * scale
+    s.y = (s.y - GLYPH_HEIGHT / 2) * scale
   }
-  return { stars, paths, width }
+  return { stars, paths, width: width * scale }
 }
