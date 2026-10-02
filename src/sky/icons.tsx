@@ -1,13 +1,21 @@
 import type { ReactNode } from 'react'
 import type { LayerKey } from './SkyEngine'
 
-function Icon({ children }: { children: ReactNode }) {
+function Icon({ children, size = 22 }: { children: ReactNode; size?: number }) {
   return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {children}
     </svg>
   )
 }
+
+/** A phone tipped up toward a star. */
+export const HOLD_UP_ICON = (
+  <Icon size={17}>
+    <rect x="5" y="8.5" width="8" height="13" rx="1.8" transform="rotate(-16 9 15)" />
+    <path d="M18 2.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9Z" />
+  </Icon>
+)
 
 export const LAYER_ICONS: Record<LayerKey, ReactNode> = {
   name: (

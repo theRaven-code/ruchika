@@ -5,4 +5,6 @@ export const OBSERVER = {
   longitude: 76.98361,
   timeZoneLabel: 'IST',
   utcOffsetMinutes: 330,
+  /** Degrees magnetic north lies east of true north (WMM2025, late 2026). Phone compasses read magnetic. */
+  magneticDeclination: 2.0,
 } as const

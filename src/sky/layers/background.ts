@@ -31,8 +31,8 @@ void main() {
     col += pow(mw, vec3(2.4)) * uMilkyWayStrength;
   }
 
-  if (uAtmosphere > 0.5) {
-    col += skyRadiance(dir);
+  if (uAtmosphere > 0.0) {
+    col += skyRadiance(dir) * uAtmosphere;
   }
   gl_FragColor = vec4(tonemap(col * uExposure), 1.0);
 }

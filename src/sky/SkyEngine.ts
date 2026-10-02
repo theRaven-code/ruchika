@@ -66,6 +66,23 @@ export type Selection = {
   dec: number
 }
 
+export type PointingStatus = 'waiting' | 'searching' | 'found' | 'hidden'
+
+/** The phone held up to the sky, and where the name is in it. */
+export type PointingInfo = {
+  status: PointingStatus
+  /** Where the centre of the name is right now. */
+  az: number
+  alt: number
+  /** When and where the name next clears the skyline, while it is hidden. */
+  rises: { time: Date; az: number } | null
+  /** The Sun is up, so the daylight is lifted to show the stars. */
+  daylight: boolean
+}
+
+/** Reports the camera rotation that matches the way the phone is pointing. */
+export type AttitudeSource = { read(out: Quaternion): boolean }
+
 export type SkyInfo = {
   time: Date
   speed: number
@@ -76,6 +93,7 @@ export type SkyInfo = {
   selection: Selection | null
   /** Whether the name constellation is on screen and above the ridges. */
   nameVisible: boolean
+  pointing: PointingInfo | null
 }
 
 /** A name written in stars, with a countdown hanging underneath it. */
@@ -214,6 +232,21 @@ export class SkyEngine {
   private darkness = 1
   private countdownRenderer = new CountdownRenderer()
   private maxPointSize = 64
+  private pointing: {
+    source: AttitudeSource
+    /** The view when the phone took over; the camera glides away from it. */
+    from: Quaternion
+    reading: Quaternion
+    /** The reading with sensor jitter smoothed out. */
+    view: Quaternion
+    /** When the first reading arrived. */
+    start: number
+    status: PointingStatus
+    celebratedAt: number
+    rises: { time: Date; az: number } | null
+  } | null = null
+  private daylightLift = 0
+  private groundOpacity = 1
 
   constructor(
     private container: HTMLElement,
@@ -330,14 +363,39 @@ export class SkyEngine {
     celestialToWorld(new Date(this.simTime), this.observer, this.toWorld)
     const world = framePoint(this.nameFrame, 0, 0).applyMatrix4(this.toWorld)
     const { az, alt } = worldToAzAlt(world)
-    this.flyTo(az, alt - 9, fov, {
-      onDone: () => {
-        this.nameBurstStart = performance.now()
-        const now = performance.now()
-        const near = framePoint(this.nameFrame!, 0, 2).applyMatrix4(this.toWorld)
-        this.meteorQueue.push({ at: now + 250, near, bright: true }, { at: now + 900, near }, { at: now + 1600, near })
-      },
-    })
+    this.flyTo(az, alt - 9, fov, { onDone: () => this.celebrateName() })
+  }
+
+  /**
+   * Hands the camera to the phone: the sky jumps to the real time and turns to
+   * wherever the back of the phone points, so the name is where it truly is.
+   */
+  followDevice(source: AttitudeSource, fov = this.fov) {
+    this.skipVerses(false)
+    this.applyPreset('now')
+    this.selection = null
+    this.flight = null
+    this.pendingFocus = null
+    this.velocity = { yaw: 0, pitch: 0 }
+    this.fov = Math.min(MAX_FOV, Math.max(MIN_FOV, fov))
+    this.pointing = {
+      source,
+      from: this.camera.quaternion.clone(),
+      reading: new Quaternion(),
+      view: new Quaternion(),
+      start: -1,
+      status: 'waiting',
+      celebratedAt: -Infinity,
+      rises: null,
+    }
+    this.emitInfo(true)
+  }
+
+  stopFollowingDevice() {
+    this.pointing = null
+    this.groundOpacity = 1
+    this.landscape.uniforms.uOpacity.value = 1
+    this.emitInfo(true)
   }
 
   /** Smoothly turns the camera, pulling back slightly mid-flight. */
@@ -409,7 +467,7 @@ export class SkyEngine {
   }
 
   /** Drops the lines and the waiting camera move. Optionally turns toward the name. */
-  private skipVerses(turnToName = true) {
+  skipVerses(turnToName = true) {
     this.versesSkipped = true
     this.nameDelay = 0
     const pending = this.pendingFocus
@@ -578,6 +636,7 @@ export class SkyEngine {
       this.pinchDistance = spread
       return
     }
+    if (this.pointing) return
     const now = performance.now()
     const dt = Math.max(1, now - this.lastMove)
     this.lastMove = now
@@ -612,7 +671,7 @@ export class SkyEngine {
     const dx = e.deltaX * scale
     const dy = e.deltaY * scale
     if (!e.ctrlKey && Math.abs(dx) > Math.abs(dy)) {
-      this.yaw += dx * this.radiansPerPixel()
+      if (!this.pointing) this.yaw += dx * this.radiansPerPixel()
       return
     }
     this.zoom(Math.exp(dy * (e.ctrlKey ? 0.01 : 0.0015)))
@@ -620,7 +679,7 @@ export class SkyEngine {
 
   private onKeyDown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null
-    if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+    if (this.pointing || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
     const step = this.fov * DEG * 0.06
     if (e.key === 'ArrowLeft') this.yaw -= step
     else if (e.key === 'ArrowRight') this.yaw += step
@@ -745,7 +804,15 @@ export class SkyEngine {
       sunAlt: sun ? Math.asin(sun.world.y) / DEG : 0,
       selection: this.describeSelection(),
       nameVisible: this.nameVisible,
+      pointing: this.describePointing(),
     })
+  }
+
+  private describePointing(): PointingInfo | null {
+    const p = this.pointing
+    if (!p || !this.nameFrame) return null
+    const { az, alt } = worldToAzAlt(framePoint(this.nameFrame, 0, 0).applyMatrix3(this.toWorld3))
+    return { status: p.status, az, alt, rises: p.rises, daylight: this.daylightLift > 0.5 }
   }
 
   private frame = (now: number) => {
@@ -771,12 +838,34 @@ export class SkyEngine {
       if (Math.abs(this.velocity.yaw) + Math.abs(this.velocity.pitch) < 1e-6) this.velocity = { yaw: 0, pitch: 0 }
     }
 
+    this.updatePointing(now, dt)
     this.updateFlight(now)
     this.updateSky()
     this.updateMeteors(now)
     this.renderer.render(this.scene, this.camera)
     this.drawLabels()
     this.emitInfo()
+  }
+
+  /** Glides the camera onto the phone's attitude, then follows it with light smoothing. */
+  private updatePointing(now: number, dt: number) {
+    const p = this.pointing
+    // While the name is below the skyline, the ground turns see-through so she can still find it.
+    const ground = p?.status === 'hidden' ? 0.45 : 1
+    this.groundOpacity += (ground - this.groundOpacity) * (1 - Math.exp(-dt / 350))
+    this.landscape.uniforms.uOpacity.value = this.groundOpacity
+    if (!p || !p.source.read(p.reading)) return
+    if (p.start < 0) {
+      p.start = now
+      p.view.copy(p.reading)
+    }
+    // Steady against sensor jitter, but quick to catch up once the phone really moves.
+    const tau = 25 + 95 * (1 - smoothstep(0.003, 0.06, p.view.angleTo(p.reading)))
+    p.view.slerp(p.reading, 1 - Math.exp(-dt / tau))
+    this.camera.quaternion.copy(p.from).slerp(p.view, easeInOut(Math.min(1, (now - p.start) / 1500)))
+    const dir = this.tmp.set(0, 0, -1).applyQuaternion(this.camera.quaternion)
+    this.yaw = Math.atan2(dir.x, -dir.z)
+    this.pitch = Math.asin(Math.max(-1, Math.min(1, dir.y)))
   }
 
   private updateFlight(now: number) {
@@ -862,7 +951,7 @@ export class SkyEngine {
     const { shared, layers } = this
     const date = new Date(this.simTime)
 
-    this.camera.rotation.set(this.pitch, -this.yaw, 0, 'YXZ')
+    if (!this.pointing) this.camera.rotation.set(this.pitch, -this.yaw, 0, 'YXZ')
     this.camera.updateMatrixWorld()
     shared.uCamRot.value.setFromMatrix4(this.camera.matrixWorld)
     this.viewRot.setFromMatrix4(this.camera.matrixWorldInverse)
@@ -884,26 +973,29 @@ export class SkyEngine {
     const night = 1 - smoothstep(-12, 0, sunAlt)
     shared.uMoonLight.value = moon.phase * smoothstep(-2, 25, moonAlt) * night
 
-    const skyLimit = layers.atmosphere ? limitingMagnitude(sunAlt, moonAlt, moon.phase) : 6.5
+    // With the phone held up to a bright sky, the daylight is lifted so her name and the stars show.
+    this.daylightLift = this.pointing ? smoothstep(-10, -4, sunAlt) : 0
+    const atmosphere = layers.atmosphere ? 1 - this.daylightLift : 0
+    const skyLimit = 6.5 + (limitingMagnitude(sunAlt, moonAlt, moon.phase) - 6.5) * atmosphere
     shared.uLimMag.value = skyLimit + Math.max(-0.6, 1.7 * Math.log10(60 / this.fov))
     shared.uSizeScale.value = Math.min(1.6, Math.max(0.9, 1 + 0.22 * Math.log2(60 / this.fov)))
     shared.uTime.value = this.lastFrame / 1000
-    shared.uTwinkle.value = layers.atmosphere ? 1 : 0
-    shared.uExtinction.value = layers.atmosphere ? 1 : 0
+    shared.uTwinkle.value = atmosphere
+    shared.uExtinction.value = atmosphere
 
     // Eye adaptation: bright daylight needs a low exposure, the night sky a high one.
     // The ground stays sunlit even when the atmosphere layer is hidden.
     const adapt = (t: number) => Math.exp(Math.log(2.8) * (1 - t) + Math.log(0.45) * t)
     const groundDayness = smoothstep(-13, 1, sunAlt)
-    shared.uExposure.value = adapt(layers.atmosphere ? groundDayness : 0)
+    shared.uExposure.value = adapt(groundDayness * atmosphere)
     this.landscape.uniforms.uLandExposure.value = adapt(groundDayness)
-    const mwVisibility = layers.atmosphere ? smoothstep(3.6, 6.1, skyLimit) : 1
+    const mwVisibility = smoothstep(3.6, 6.1, skyLimit)
     this.background.uniforms.uMilkyWayStrength.value = layers.milkyway ? 0.065 * mwVisibility : 0
-    this.background.uniforms.uAtmosphere.value = layers.atmosphere ? 1 : 0
+    this.background.uniforms.uAtmosphere.value = atmosphere
     this.landscape.uniforms.uDay.value = smoothstep(-9, 8, sunAlt)
 
     // Figures and grids recede against a bright daytime sky.
-    const daylight = layers.atmosphere ? smoothstep(-8, 4, sunAlt) : 0
+    const daylight = smoothstep(-8, 4, sunAlt) * atmosphere
     this.overlayFade = 1 - 0.85 * daylight
     this.constellations.lines.uniforms.uOpacity.value = 0.6 * this.overlayFade
     // Additive art washes out over a bright twilight sky, so it follows sky darkness.
@@ -915,12 +1007,12 @@ export class SkyEngine {
     this.bodies.update(this.bodyStates, this.tmp.set(0, 0, 1).applyMatrix3(this.toWorld3).clone(), pxPerRadian, this.pixelRatio)
     this.bodies.moon.uniforms.uBrightness.value = 0.85 + 0.25 * night
     this.bodies.moon.uniforms.uGlow.value = 0.35 * moon.phase * night
-    this.bodies.sun.uniforms.uGlow.value = layers.atmosphere ? 1 : 0.5
+    this.bodies.sun.uniforms.uGlow.value = 0.5 + 0.5 * atmosphere
 
     const lineScale = this.pixelRatio
     for (const lines of this.lineMeshes) lines.uniforms.uWidth.value = lines.baseWidth * lineScale
 
-    this.darkness = layers.atmosphere ? smoothstep(2.5, 5, skyLimit) : 1
+    this.darkness = smoothstep(2.5, 5, skyLimit)
     if (this.nameLayers.length) this.animateName(daylight, lineScale)
   }
 
@@ -981,9 +1073,11 @@ export class SkyEngine {
     const { layers } = this
     const font = (size: number, weight = 500) => `${weight} ${size}px Inter, ui-sans-serif, system-ui, sans-serif`
     const v = new Vector3()
+    // Cardinal points and planets help find the way around the real sky too.
+    const guided = this.exploring || this.pointing !== null
 
     CARDINALS.forEach((text, i) => {
-      if (!this.exploring) return
+      if (!guided) return
       const az = i * 45
       const base = layers.landscape ? this.landscape.ridgeAltitude(az) : 0
       if (!this.project(azAltToWorld(az, base + 1.8, v), this.screen)) return
@@ -1001,7 +1095,7 @@ export class SkyEngine {
     const limit = this.shared.uLimMag.value
     for (const body of this.bodyStates) {
       const visible = body.id === 'Sun' || body.id === 'Moon' || body.mag < limit + 0.5
-      if (!this.exploring || !visible || this.hiddenByLandscape(body.world)) continue
+      if (!guided || !visible || this.hiddenByLandscape(body.world)) continue
       if (!this.project(body.world, this.screen)) continue
       labels.push({
         text: BODY_NAMES[body.id],
@@ -1057,11 +1151,131 @@ export class SkyEngine {
     const marker = this.selectionWorld()
     const markerPoint = marker && this.project(marker, this.screen) ? this.screen.clone() : null
     this.updateNameVisibility()
+    this.updatePointingStatus()
     this.labelLayer.draw(labels, markerPoint, (ctx) => [
       ...this.drawCountdown(ctx),
       ...this.drawSkyQuote(ctx),
       ...this.drawVerses(ctx),
+      ...this.drawPointingArrow(ctx),
     ])
+  }
+
+  /** Whether the name is hidden, still being looked for, or right in front of the phone. */
+  private updatePointingStatus() {
+    const p = this.pointing
+    if (!p || !this.nameFrame) return
+    const center = framePoint(this.nameFrame, 0, 0).applyMatrix3(this.toWorld3)
+    let status: PointingStatus = 'waiting'
+    if (p.start >= 0) {
+      if (this.hiddenByLandscape(center)) status = 'hidden'
+      else if (!this.project(center, this.screen)) status = 'searching'
+      else {
+        const dx = Math.abs(this.screen.x / this.width - 0.5)
+        const dy = Math.abs(this.screen.y / this.height - 0.5)
+        // Found near the middle of the view; it stays found until it leaves the screen.
+        const found = (dx < 0.3 && dy < 0.3) || (p.status === 'found' && dx < 0.5 && dy < 0.5)
+        status = found ? 'found' : 'searching'
+      }
+    }
+    if (status === p.status) return
+    if (status === 'found' && performance.now() - p.celebratedAt > 8000) {
+      p.celebratedAt = performance.now()
+      this.celebrateName()
+    }
+    p.rises = status === 'hidden' ? this.nextNameRise() : null
+    p.status = status
+    this.emitInfo(true)
+  }
+
+  /** When and where the centre of the name next clears the skyline, looking a day ahead. */
+  private nextNameRise() {
+    const frame = this.nameFrame
+    if (!frame) return null
+    const toWorld = new Matrix4()
+    const world = new Vector3()
+    for (let minutes = 2; minutes <= 24 * 60; minutes += 2) {
+      const time = new Date(this.simTime + minutes * 60_000)
+      celestialToWorld(time, this.observer, toWorld)
+      if (!this.hiddenByLandscape(world.copy(frame.center).applyMatrix4(toWorld))) {
+        return { time, az: worldToAzAlt(world).az }
+      }
+    }
+    return null
+  }
+
+  /** A bright wave through the letters and a few meteors falling past them. */
+  private celebrateName() {
+    if (!this.nameFrame) return
+    const now = performance.now()
+    this.nameBurstStart = now
+    const near = framePoint(this.nameFrame, 0, 2).applyMatrix3(this.toWorld3)
+    this.meteorQueue.push({ at: now + 250, near, bright: true }, { at: now + 900, near }, { at: now + 1600, near })
+  }
+
+  /** While the name is out of view, an arrow at the edge of the screen leads the phone to it. */
+  private drawPointingArrow(ctx: CanvasRenderingContext2D): [number, number, number, number][] {
+    const p = this.pointing
+    if (!p || !this.nameFrame || !this.dedication || p.status === 'waiting' || p.status === 'found') return []
+    const center = framePoint(this.nameFrame, 0, 0).applyMatrix3(this.toWorld3)
+    if (this.project(center, this.screen)) {
+      const { x, y } = this.screen
+      if (x > 0 && x < this.width && y > 0 && y < this.height) return []
+    }
+    // Screen direction of the shortest turn toward the name, even when it is behind the phone.
+    const view = this.tmp2.copy(center).applyMatrix3(this.viewRot)
+    const length = Math.hypot(view.x, view.y)
+    const dx = length > 1e-6 ? view.x / length : 0
+    const dy = length > 1e-6 ? -view.y / length : -1
+
+    // Kept clear of the location badge above and the caption below.
+    const left = 30
+    const right = this.width - 30
+    const top = 96
+    const bottom = this.height - 170
+    const cx = this.width / 2
+    const cy = (top + bottom) / 2
+    const reachX = dx > 0 ? (right - cx) / dx : dx < 0 ? (left - cx) / dx : Infinity
+    const reachY = dy > 0 ? (bottom - cy) / dy : dy < 0 ? (top - cy) / dy : Infinity
+    const now = performance.now()
+    const reach = Math.min(reachX, reachY) + 4 * Math.sin(now / 260)
+    const x = cx + dx * reach
+    const y = cy + dy * reach
+    const alpha = 0.8 + 0.2 * Math.sin(now / 420)
+
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = 'rgb(255, 226, 168)'
+    ctx.save()
+    ctx.shadowColor = 'rgba(255, 205, 140, 0.9)'
+    ctx.shadowBlur = 14
+    ctx.translate(x, y)
+    ctx.rotate(Math.atan2(dy, dx))
+    ctx.beginPath()
+    ctx.moveTo(12, 0)
+    ctx.lineTo(-8, -10)
+    ctx.lineTo(-3, 0)
+    ctx.lineTo(-8, 10)
+    ctx.closePath()
+    ctx.fill()
+    ctx.restore()
+
+    const text = this.dedication.name.toUpperCase()
+    ctx.font = '600 11px Inter, ui-sans-serif, system-ui, sans-serif'
+    ctx.letterSpacing = '1.6px'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const half = ctx.measureText(text).width / 2
+    const back = 24 + half * Math.abs(dx) + 4 * Math.abs(dy)
+    const lx = x - dx * back
+    const ly = y - dy * back
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'
+    ctx.shadowBlur = 6
+    ctx.fillText(text, lx, ly)
+    ctx.restore()
+    return [
+      [x - 16, y - 16, x + 16, y + 16],
+      [lx - half - 4, ly - 9, lx + half + 4, ly + 9],
+    ]
   }
 
   private updateNameVisibility() {

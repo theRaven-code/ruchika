@@ -31,6 +31,7 @@ uniform sampler2D uHorizon;
 uniform float uLayers;
 uniform float uDay;
 uniform float uLandExposure;
+uniform float uOpacity;
 uniform float uRefDist[${MAX_LAYERS}];
 ${UNPROJECT_GLSL}
 ${ATMOSPHERE_GLSL}
@@ -151,7 +152,7 @@ void main() {
   }
   float alpha = 1.0 - transmit;
   if (alpha <= 0.0) discard;
-  gl_FragColor = vec4(tonemap(acc * uLandExposure / alpha) * alpha, alpha);
+  gl_FragColor = vec4(tonemap(acc * uLandExposure / alpha) * alpha, alpha) * uOpacity;
 }
 `
 
@@ -188,6 +189,7 @@ export function createLandscape(horizon: HorizonData) {
     uLayers: { value: layers },
     uDay: { value: 0 },
     uLandExposure: { value: 1 },
+    uOpacity: { value: 1 },
     uRefDist: { value: refDist },
   }
   const material = new ShaderMaterial({
