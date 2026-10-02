@@ -60,6 +60,39 @@ const GLYPHS: Record<string, Glyph> = {
   Y: { width: 3.2, stars: [[0, 6], [1.6, 3.2], [3.2, 6], [1.6, 0]], paths: [[0, 1, 2], [1, 3]] },
   Z: { width: 3.2, stars: [[0, 6], [3.2, 6], [0, 0], [3.2, 0]], paths: [[0, 1, 2, 3]] },
   ' ': { width: 2.2, stars: [], paths: [] },
+  // रुचिका — ru, chi, kaa. Shared shirorekha; ि arches above, ु hangs below.
+  रु: {
+    width: 5.6,
+    join: true,
+    stars: [
+      [0.0, 6], [2.5, 6], [4.25, 6], [5.55, 6],
+      [4.25, 3.35], [4.25, 0.95],
+      [2.35, 3.05], [0.5, 2.45], [0.75, 1.2],
+      [3.45, 0.15], [4.4, -0.75], [5.45, -0.1],
+    ],
+    paths: [[0, 1, 2, 3], [2, 4, 5], [4, 6, 7, 8], [5, 9, 10, 11]],
+  },
+  चि: {
+    width: 7.0,
+    join: true,
+    stars: [
+      [0.0, 6], [1.55, 6], [3.7, 6], [6.95, 6],
+      [1.55, 3.3], [1.7, 1.25], [3.6, 0.2], [5.7, 0.7], [6.5, 2.2], [6.1, 3.45],
+      [0.55, 6.25], [2.55, 7.55], [4.6, 6.25],
+    ],
+    paths: [[0, 1, 2, 3], [1, 4, 5, 6, 7, 8, 9], [10, 11, 12]],
+  },
+  का: {
+    width: 6.8,
+    join: true,
+    stars: [
+      [0.0, 6], [2.2, 6], [4.35, 6], [6.75, 6],
+      [2.2, 3.2], [2.2, 0.2],
+      [0.55, 3.7], [0.15, 2.45],
+      [6.75, 3.15], [6.75, 0.2],
+    ],
+    paths: [[0, 1, 2, 3], [1, 4, 5], [4, 6, 7], [3, 8, 9]],
+  },
 }
 /** Greek capitals that share a star-figure with a Latin letter. */
 const GREEK_SHAPE: Record<string, string> = {
@@ -92,7 +125,7 @@ export function layoutName(text: string, targetWidth?: number) {
     const key = cluster.toUpperCase()
     const glyph = GLYPHS[cluster] ?? GLYPHS[key] ?? GLYPHS[GREEK_SHAPE[cluster] ?? '']
     if (!glyph) continue
-    if (x > 0) x += glyph.join && previousJoined ? 0.15 : LETTER_GAP
+    if (x > 0) x += glyph.join && previousJoined ? 0.08 : LETTER_GAP
     const base = stars.length
     const ends = new Set(glyph.paths.flatMap((p) => [p[0], p.at(-1)!]))
     glyph.stars.forEach(([sx, sy], i) => {

@@ -10,10 +10,15 @@ const dedication: Dedication = {
   celebration: { title: 'Happy Birthday', caption: '14 December' },
   verses: [
     'I may have forgotten your birthday many a times,',
-    'But, love, the love I have for you has always grown stronger',
-    'This is a trailer to what is yet to come',
-    'Anticipating your birthday,',
-    "I've got nothing better to do but, count the stars",
+    "But love, I've specificially planned this thing since the Valentines day ", 
+    "Although, I understand that I haven't been the best partner,", 
+    "All I ever loved this much is you",
+    'I love you so much and there is no bound to it,',
+    "You've always told me how you liked the stars and how I never discussed about it",
+    "Now you find me counting the stars,",
+    "For I've got nothing better to do but, ",
+    "wait for your stars to align with mine",
+    "counting every second until your birthday", 
   ],
   countdown: () => {
     const state = getBirthdayState()

@@ -356,14 +356,21 @@ export class SkyEngine {
     this.nextMeteorAt = this.nameRevealStart + prelude * 1000
   }
 
-  /** Swoops to the name, then sends a wave of light and a few meteors through it. */
+  /** Turns to the name, then sends a wave of light and a few meteors through it. */
   focusName(fov = this.fov) {
     this.skipVerses(false)
     if (!this.nameFrame) return
     celestialToWorld(new Date(this.simTime), this.observer, this.toWorld)
     const world = framePoint(this.nameFrame, 0, 0).applyMatrix4(this.toWorld)
     const { az, alt } = worldToAzAlt(world)
-    this.flyTo(az, alt - 9, fov, { onDone: () => this.celebrateName() })
+    const from = azAltToWorld(this.yaw / DEG, this.pitch / DEG)
+    const to = azAltToWorld(az, alt - 9)
+    const angle = from.angleTo(to) / DEG
+    this.flyTo(az, alt - 9, fov, {
+      duration: Math.min(7500, Math.max(3200, 2000 + angle * 32)),
+      swell: Math.min(12, 4 + angle * 0.15),
+      onDone: () => this.celebrateName(),
+    })
   }
 
   /**
@@ -448,9 +455,9 @@ export class SkyEngine {
       right: rightWorld.applyMatrix3(toEqj),
       unit: width / Math.max(1, layoutName(this.dedication.name).width),
     }
-    // Same letter height and the same patch of sky. Marathi and Tamil are
-    // naturally a little narrower than the English star-letters.
-    this.nameLayers = [this.dedication.name, 'ΡΟΥΧΙΚΑ'].map((script) =>
+    // Same letter height and the same patch of sky. Marathi is
+    // a little narrower than the English star-letters.
+    this.nameLayers = [this.dedication.name, 'रुचिका'].map((script) =>
       createNameConstellation(script, this.nameFrame!),
     )
     for (const layer of this.nameLayers) {
@@ -1052,7 +1059,7 @@ export class SkyEngine {
     })
   }
 
-  /** English star-letters, then her name in Greek, the script of that sky science. */
+  /** English star-letters, then her name in Marathi. */
   private updateNameCycle(t: number) {
     if (t < 5.4) {
       this.nameWeights = [1, 0]

@@ -142,7 +142,8 @@ function pointingWords(pointing: PointingInfo, name: string): [string, string] {
 
 /**
  * Tonight's darkest sky, running in real time, with the name written above the
- * view. The opening shot rises from the ridges; later returns glide over.
+ * view. The opening shot starts well away and pans onto the letters; later
+ * returns glide over from wherever the camera already is.
  */
 function showDedication(engine: SkyEngine, dedication: Dedication, opening: boolean) {
   const [az, alt] = PRESET_VIEWS.night!
@@ -151,7 +152,9 @@ function showDedication(engine: SkyEngine, dedication: Dedication, opening: bool
   engine.applyPreset('night')
   engine.setSpeed(1)
   engine.setDedication(dedication)
-  engine.presentName(az, alt, fov, opening ? { az: az + 78, alt: 6, fov } : undefined)
+  // Far enough that a wide landscape view cannot see the name, same height so
+  // the sky turns rather than climbing off the ridges.
+  engine.presentName(az, alt, fov, opening ? { az: az + 80, alt:20, fov } : undefined)
 }
 
 type SkyViewerProps = {
