@@ -65,15 +65,34 @@ export class CountdownRenderer {
       }
     })
 
+    let captionBottom = y + labelSize * 5.5
     if (caption) {
+      const capSize = labelSize * 1.05
+      const capWidth = Math.max(total * 1.45, 520)
+      ctx.font = `italic 400 ${capSize}px ${FONT}`
+      ctx.letterSpacing = '0.5px'
+      const words = caption.split(' ')
+      const lines: string[] = []
+      let current = ''
+      for (const word of words) {
+        const next = current ? `${current} ${word}` : word
+        if (ctx.measureText(next).width > capWidth && current) {
+          lines.push(current)
+          current = word
+        } else {
+          current = next
+        }
+      }
+      if (current) lines.push(current)
+      const capY = y + labelSize * 6.6
+      const capLead = capSize * 1.5
       ctx.globalAlpha = alpha * 0.7
       ctx.shadowBlur = 8
       ctx.fillStyle = 'rgb(205, 218, 255)'
-      ctx.font = `italic 400 ${labelSize * 1.05}px ${FONT}`
-      ctx.letterSpacing = '0.5px'
-      ctx.fillText(caption, x, y + labelSize * 4.6)
+      lines.forEach((line, i) => ctx.fillText(line, x, capY + i * capLead))
+      captionBottom = capY + (lines.length - 1) * capLead + capSize * 0.4
     }
-    return [x - total / 2 - gap, y - size * 1.1, x + total / 2 + gap, y + labelSize * 5.5]
+    return [x - Math.max(total / 2 + gap, 260), y - size * 1.1, x + Math.max(total / 2 + gap, 260), captionBottom]
   }
 
   /** The birthday itself: a glowing greeting in place of the digits. */
@@ -107,9 +126,9 @@ export class CountdownRenderer {
       ctx.fillStyle = 'rgb(225, 228, 255)'
       ctx.font = `italic 400 ${size * 0.28}px ${FONT}`
       ctx.letterSpacing = '0.5px'
-      ctx.fillText(caption, x, y + size * 0.75)
+      ctx.fillText(caption, x, y + size * 1.05)
     }
-    return [x - width / 2 - size, y - size * 1.1, x + width / 2 + size, y + size]
+    return [x - width / 2 - size, y - size * 1.1, x + width / 2 + size, y + size * 1.25]
   }
 
   private slot(key: string, char: string, now: number) {

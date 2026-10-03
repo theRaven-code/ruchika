@@ -2,18 +2,15 @@ import { smoothstep } from './astro'
 
 /** Sky notes folded together with how much she is loved. */
 export const SKY_QUOTES = [
-  'I love you the way this sky holds the dark: quietly, and without an edge.',
-  'If I could hang one light for you, it would be a star that never sets.',
-  'The Milky Way is a river of suns. You are why I keep looking up.',
-  'A shooting star is a wish with a short life. Mine for you does not burn out.',
-  'Stars twinkle because the air is restless. My love for you is the still thing.',
-  'Moonlight is only borrowed sunlight. What I feel for you is my own.',
-  'I would count every star above Kamand if it brought your birthday closer.',
-  'Planets keep their course. So do I, love. Always back to you.',
-  'Twilight is the sky refusing to let go of the light. I know that feeling.',
-  'Some constellations are pictures. You are the one I actually believe in.',
+  
+  'I heard twilight is the sky refusing to let go of the light. I know that feeling.',
+   "I know you are seeing this in the worst possible time, but I've never faked my love for you mama.",
   'The darker the night, the more stars. The longer I know you, the more I love you.',
-  'Blue stars burn hot. Red stars burn long. I want the long kind, with you.',
+  "Let me be the guy that takes your hand and leads you through the darkness.",
+  "You really don't have to mother me anymore, I'll be your responsible appa",
+  "You've made me into a better man, and its time I take care of you.",
+  "We'll be a team, and face the universe love", 
+  "This is the largest and most ambitious project I've ever worked on,in my entire career.",
 ]
 
 const FONT = 'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif'
@@ -62,9 +59,10 @@ export function drawSkyQuote(
   ctx.textBaseline = 'alphabetic'
   ctx.letterSpacing = '0.15px'
   const lines = wrap(ctx, quote, maxWidth)
-  const lineHeight = size * 1.45
+  const lineHeight = size * 1.55
+  // `y` is the last line, nearest the name; extra wraps step up, not into the letters.
   lines.forEach((line, i) => {
-    const ly = y + i * lineHeight
+    const ly = y - (lines.length - 1 - i) * lineHeight
     ctx.globalAlpha = alpha
     ctx.shadowColor = 'rgba(0, 0, 8, 0.9)'
     ctx.shadowBlur = size * 0.7
@@ -77,8 +75,9 @@ export function drawSkyQuote(
     ctx.fillText(line, x, ly)
   })
   ctx.restore()
-  const width = Math.min(maxWidth, size * 28)
-  return [x - width / 2, y - size * 1.2, x + width / 2, y + lines.length * lineHeight]
+  const width = Math.min(maxWidth, size * 42)
+  const top = y - (lines.length - 1) * lineHeight - size * 1.2
+  return [x - width / 2, top, x + width / 2, y + size * 0.35]
 }
 
 /** A stable shuffle so the cycle is random but doesn't jump every frame. */

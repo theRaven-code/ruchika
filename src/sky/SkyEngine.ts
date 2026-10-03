@@ -1404,9 +1404,9 @@ export class SkyEngine {
       SKY_QUOTES,
       this.quoteOrder,
       0,
-      -anchor.half - size * 3.4,
+      -anchor.half - size * 6.8,
       size,
-      Math.min(anchor.unitPx * 22, 520),
+      Math.min(this.width * 0.82, 900),
       this.nameClock() - 4.5,
     )
     ctx.restore()
