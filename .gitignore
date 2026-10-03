@@ -11,3 +11,4 @@ dist
 .secrets
 github.token
 .vercel
+.something
