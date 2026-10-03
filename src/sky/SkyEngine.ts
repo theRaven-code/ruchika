@@ -1386,7 +1386,9 @@ export class SkyEngine {
         )
     ctx.restore()
     return [this.orientedRect(anchor, rect)]
-  }
+  } 
+
+  
 
   /** A note about the sky, on the same line as the letters, just above them. */
   private drawSkyQuote(ctx: CanvasRenderingContext2D): [number, number, number, number][] {
