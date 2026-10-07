@@ -364,12 +364,12 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
           )}
           <div className="sky-intro__row">
             <span className="sky-intro__hint">Drag to look around</span>
-            <button
+            {/* <button
               className={info && !info.nameVisible ? 'sky-intro__focus is-lost' : 'sky-intro__focus'}
               onClick={() => engine?.focusName(defaultFov())}
             >
               <span aria-hidden="true">✦</span> Focus on {dedication.name}
-            </button>
+            </button> */}
             <button className="sky-intro__explore" onClick={startExploring}>
               Explore the sky
             </button>

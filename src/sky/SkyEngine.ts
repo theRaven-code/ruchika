@@ -33,7 +33,7 @@ import { createBackground } from './layers/background'
 import { createBodies } from './layers/bodies'
 import { createConstellations, type ConstellationLabel } from './layers/constellations'
 import { createAzimuthalGrid, createEquatorialGrid } from './layers/grids'
-import { drawCelestialVerses, versePreludeSeconds } from './celestialVerses'
+import { drawCelestialVerses } from './celestialVerses'
 import { drawSkyQuote, shuffledQuoteOrder, SKY_QUOTES } from './skyQuotes'
 import { CountdownRenderer, type CountdownPart } from './countdownRenderer'
 import { createLandscape } from './layers/landscape'
@@ -343,17 +343,18 @@ export class SkyEngine {
    * Writes the name above the view (az, alt, fov) and glides the camera there,
    * optionally starting from a lower, wider pose for an opening shot.
    */
-  presentName(az: number, alt: number, fov: number, from?: { az: number; alt: number; fov: number }) {
-    if (from) this.lookAt(from.az, from.alt, from.fov)
+  presentName(az: number, alt: number, fov: number, _from?: { az: number; alt: number; fov: number }) {
     this.placeName(az, alt + 9, fov)
-    const count = this.dedication?.verses.length ?? 0
-    const prelude = Math.max(1, versePreludeSeconds(count))
-    this.nameDelay = prelude
+    // const count = this.dedication?.verses.length ?? 0
+    // const prelude = Math.max(1, versePreludeSeconds(count))
+    // this.nameDelay = prelude
+    this.versesSkipped = true
+    this.nameDelay = 0
     this.focusTarget = { az, alt, fov }
     this.pendingFocus = null
-    // The sky turns the whole time the lines are read, and arrives as they end.
-    this.flyTo(az, alt, fov, { duration: prelude * 1000, swell: 10 })
-    this.nextMeteorAt = this.nameRevealStart + prelude * 1000
+    this.lookAt(az, alt, fov)
+    // this.flyTo(az, alt, fov, { duration: prelude * 1000, swell: 10 })
+    this.nextMeteorAt = this.nameRevealStart
   }
 
   /** Turns to the name, then sends a wave of light and a few meteors through it. */
@@ -464,7 +465,7 @@ export class SkyEngine {
       layer.stars.visible = this.layers.name
       layer.lines.mesh.visible = this.layers.name
       layer.starUniforms.uMaxPointSize.value = this.maxPointSize
-      this.celestial.add(layer.stars, layer.lines.mesh)
+      // this.celestial.add(layer.stars, layer.lines.mesh)
     }
     this.nameWeights = [1, 0]
     this.shareUniforms()
@@ -1160,9 +1161,9 @@ export class SkyEngine {
     this.updateNameVisibility()
     this.updatePointingStatus()
     this.labelLayer.draw(labels, markerPoint, (ctx) => [
-      ...this.drawCountdown(ctx),
-      ...this.drawSkyQuote(ctx),
-      ...this.drawVerses(ctx),
+      // ...this.drawCountdown(ctx),
+      // ...this.drawSkyQuote(ctx),
+      // ...this.drawVerses(ctx),
       ...this.drawPointingArrow(ctx),
     ])
   }
