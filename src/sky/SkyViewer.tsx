@@ -14,7 +14,6 @@ import {
   type Dedication,
   type LayerKey,
   type LayerState,
-  type PointingInfo,
   type SkyInfo,
 } from './SkyEngine'
 import {
@@ -28,7 +27,7 @@ import {
 } from './time'
 import './sky.css'
 
-/** The default view is just the sky and the name; filters come with "Explore". */
+/** The sky opens on the explore screen, with these layers already on. */
 const DEFAULT_LAYERS: LayerState = {
   name: true,
   constellations: false,
@@ -117,44 +116,13 @@ function heightInSky(alt: number) {
   return 'almost straight overhead'
 }
 
-/** The caption while the phone is held up: a headline and where to look. */
-function pointingWords(pointing: PointingInfo, name: string): [string, string] {
-  const where = `${compassPoint(pointing.az)}, ${heightInSky(pointing.alt)}`
-  switch (pointing.status) {
-    case 'waiting':
-      return ['Hold your phone up to the sky.', 'Finding north…']
-    case 'searching':
-      return ['Hold your phone up to the sky.', `${name} is in the ${where}.`]
-    case 'found':
-      return [
-        'Your name is actually up there right now.',
-        pointing.daylight ? `In the ${where}. Daylight hides it for now.` : `Look ${where}.`,
-      ]
-    case 'hidden':
-      return [
-        pointing.alt > 0 ? 'Your name is just behind the mountains right now.' : 'Your name is below the horizon right now.',
-        pointing.rises
-          ? `It rises in the ${compassPoint(pointing.rises.az)} at ${formatLocalTime(pointing.rises.time)}.`
-          : 'It stays out of sight for the rest of the day.',
-      ]
-  }
-}
-
-/**
- * Tonight's darkest sky, running in real time, with the name written above the
- * view. The opening shot starts well away and pans onto the letters; later
- * returns glide over from wherever the camera already is.
- */
-function showDedication(engine: SkyEngine, dedication: Dedication, opening: boolean) {
+/** Tonight's sky, with the explore controls already open. */
+function showMainSky(engine: SkyEngine) {
   const [az, alt] = PRESET_VIEWS.night!
-  const fov = defaultFov()
-  engine.setExploring(false)
+  engine.setExploring(true)
   engine.applyPreset('night')
   engine.setSpeed(1)
-  engine.setDedication(dedication)
-  // Far enough that a wide landscape view cannot see the name, same height so
-  // the sky turns rather than climbing off the ridges.
-  engine.presentName(az, alt, fov, opening ? { az: az + 80, alt:20, fov } : undefined)
+  engine.lookAt(az, alt, defaultFov())
 }
 
 type SkyViewerProps = {
@@ -169,13 +137,12 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
   const [info, setInfo] = useState<SkyInfo | null>(null)
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
   const [preset, setPreset] = useState<Preset | null>('night')
-  const [exploring, setExploring] = useState(false)
+  const [exploring, setExploring] = useState(true)
   const [curtain, setCurtain] = useState(false)
   const [showCredits, setShowCredits] = useState(false)
   const [canPoint] = useState(() => canFollowDevice())
   const [pointing, setPointing] = useState<'off' | 'starting' | 'on'>('off')
   const [notice, setNotice] = useState<string | null>(null)
-  const [hasLeftIntro, setHasLeftIntro] = useState(false)
   const heldUp = pointing !== 'off'
   const phone = useRef<{ attitude: DeviceAttitude; release: () => void } | null>(null)
 
@@ -194,7 +161,8 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         created = new SkyEngine(containerRef.current, data)
         created.onInfo = setInfo
         created.setLayers(DEFAULT_LAYERS)
-        showDedication(created, dedication, true)
+        created.setDedication(dedication)
+        showMainSky(created)
         setEngine(created)
         setStatus('ready')
       })
@@ -221,9 +189,9 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
   }, [notice])
 
   const time = info?.time ?? new Date()
-  const [pointingHeadline, pointingDetail] = info?.pointing
-    ? pointingWords(info.pointing, dedication.name)
-    : ['Hold your phone up to the sky.', 'Finding north…']
+  const viewWhere = info
+    ? `${compassPoint(info.az)}, ${info.alt < 0 ? 'below the horizon' : heightInSky(info.alt)}`
+    : 'Finding north…'
 
   function choosePreset(next: Preset) {
     if (!engine) return
@@ -238,13 +206,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
     setLayers((current) => ({ ...current, [key]: !current[key] }))
   }
 
-  function startExploring() {
-    engine?.setExploring(true)
-    setHasLeftIntro(true)
-    setExploring(true)
-  }
-
-  /** The sky follows the phone, at the real time, so her name sits where it truly is. */
+  /** The sky follows the phone, at the real time. */
   async function holdUpToSky() {
     if (!engine || pointing !== 'off') return
     const attitude = new DeviceAttitude()
@@ -252,7 +214,6 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
     const started = attitude.start()
     const release = keepScreenOn()
     setNotice(null)
-    setHasLeftIntro(true)
     setPointing('starting')
     const result = await started
     if (result !== 'ready') {
@@ -282,24 +243,9 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
       engine.stopFollowingDevice()
       setPointing('off')
       setPreset('night')
-      setExploring(false)
       setShowCredits(false)
-      showDedication(engine, dedication, false)
-      engine.skipVerses()
-      setCurtain(false)
-    }, 380)
-  }
-
-  // Dims the view briefly so the jump back to tonight's sky isn't abrupt.
-  function backToName() {
-    if (!engine) return
-    setCurtain(true)
-    window.setTimeout(() => {
-      setExploring(false)
-      setLayers(DEFAULT_LAYERS)
-      setPreset('night')
-      setShowCredits(false)
-      showDedication(engine, dedication, false)
+      showMainSky(engine)
+      setExploring(true)
       setCurtain(false)
     }, 380)
   }
@@ -325,65 +271,19 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         </div>
       </header>
 
-      {exploring && !heldUp && (
+      {status === 'ready' && exploring && !heldUp && canPoint && (
         <div className="sky-top-left">
-          <button className="sky-back" onClick={backToName}>
-            <span aria-hidden="true">←</span> Back to {dedication.name}
+          <button className="sky-back sky-hold-mini" onClick={holdUpToSky}>
+            {HOLD_UP_ICON}
+            Hold the phone up
           </button>
-          {canPoint && (
-            <button className="sky-back sky-hold-mini" onClick={holdUpToSky}>
-              {HOLD_UP_ICON}
-              Hold the phone up
-            </button>
-          )}
-        </div>
-      )}
-
-      {status === 'ready' && !exploring && !heldUp && (
-        <div
-          className={[
-            'sky-intro',
-            canPoint ? 'is-hold' : '',
-            hasLeftIntro ? 'is-back' : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {canPoint && (
-            <>
-              <button className="sky-intro__hold" onClick={holdUpToSky}>
-                {HOLD_UP_ICON}
-                Hold the phone up to the sky
-              </button>
-              {httpsUrlForSensors() && (
-                <p className="sky-intro__https">
-                  Compass needs https — open <strong>{httpsUrlForSensors()}</strong> and accept the warning
-                </p>
-              )}
-            </>
-          )}
-          <div className="sky-intro__row">
-            <span className="sky-intro__hint">Drag to look around</span>
-            {/* <button
-              className={info && !info.nameVisible ? 'sky-intro__focus is-lost' : 'sky-intro__focus'}
-              onClick={() => engine?.focusName(defaultFov())}
-            >
-              <span aria-hidden="true">✦</span> Focus on {dedication.name}
-            </button> */}
-            <button className="sky-intro__explore" onClick={startExploring}>
-              Explore the sky
-            </button>
-          </div>
         </div>
       )}
 
       {heldUp && (
-        <div
-          className={info?.pointing?.status === 'found' ? 'sky-pointing is-found' : 'sky-pointing'}
-          aria-live="polite"
-        >
-          <p className="sky-pointing__headline">{pointingHeadline}</p>
-          <p className="sky-pointing__where">{pointingDetail}</p>
+        <div className="sky-pointing" aria-live="polite">
+          <p className="sky-pointing__headline">The sky is following your phone.</p>
+          <p className="sky-pointing__where">{viewWhere}</p>
           <button onClick={putPhoneDown}>Put the phone down</button>
         </div>
       )}
@@ -416,7 +316,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         </aside>
       )}
 
-      {exploring && !heldUp && (
+      {status === 'ready' && exploring && !heldUp && (
         <footer className="sky-dock">
           <div className="sky-zoom">
             <button onClick={() => engine?.zoom(0.8)} aria-label="Zoom in">
@@ -433,7 +333,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
           </div>
 
           <nav className="sky-toolbar" aria-label="Sky layers">
-            {LAYER_LABELS.map(([key, label]) => (
+            {LAYER_LABELS.filter(([key]) => key !== 'name').map(([key, label]) => (
               <button
                 key={key}
                 className={layers[key] ? 'is-on' : ''}
@@ -442,7 +342,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
                 title={label}
               >
                 {LAYER_ICONS[key]}
-                <span>{key === 'name' ? dedication.name : label}</span>
+                <span>{label}</span>
               </button>
             ))}
           </nav>

@@ -36,7 +36,7 @@ const dedication: Dedication = {
 export default function App() {
   return (
     <>
-      <h1 className="sr-only">Ruchika: birthday countdown under the night sky of IIT Mandi</h1>
+      <h1 className="sr-only">Night sky over IIT Mandi</h1>
       <Suspense fallback={<div className="sky-fallback" />}>
         <SkyViewer dedication={dedication} />
       </Suspense>
