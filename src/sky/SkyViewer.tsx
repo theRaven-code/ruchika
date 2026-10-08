@@ -119,10 +119,11 @@ function heightInSky(alt: number) {
 /** Tonight's sky, with the explore controls already open. */
 function showMainSky(engine: SkyEngine) {
   const [az, alt] = PRESET_VIEWS.night!
-  engine.setExploring(true)
+  const fov = defaultFov()
   engine.applyPreset('night')
   engine.setSpeed(1)
-  engine.lookAt(az, alt, defaultFov())
+  engine.presentName(az, alt, fov)
+  engine.setExploring(true)
 }
 
 type SkyViewerProps = {
