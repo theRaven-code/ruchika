@@ -361,9 +361,47 @@
   position: absolute;
   top: 64px;
   left: 16px;
+  display: flex;
+  flex-direction: column;
   width: min(270px, calc(100vw - 32px));
+  /* Clear of the dock along the bottom. */
+  max-height: max(220px, calc(100% - 330px));
   padding: 14px 16px 12px;
   border-radius: 16px;
+}
+
+.sky-selection__body {
+  min-height: 0;
+  margin-right: -8px;
+  padding-right: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sky-selection__about {
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: rgba(227, 234, 255, 0.86);
+}
+
+.sky-selection__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #ffe2a8;
+  text-align: left;
+  text-decoration: underline dotted rgba(255, 226, 168, 0.6);
+  text-underline-offset: 3px;
+}
+
+.sky-selection__link:hover {
+  text-decoration-style: solid;
+}
+
+.sky-selection__closer {
+  align-self: flex-start;
+  margin-top: 12px;
 }
 
 .sky-selection h2 {

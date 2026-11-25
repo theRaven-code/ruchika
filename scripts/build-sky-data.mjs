@@ -30,6 +30,7 @@ const SOURCES = {
     file: 'hyg/hyg_v44.csv.gz',
   },
   stellariumIndex: { url: `${STELLARIUM}/index.json`, file: 'stellarium/index.json' },
+  stellariumDescription: { url: `${STELLARIUM}/description.md`, file: 'stellarium/description.md' },
   milkyWay: {
     // NASA SVS "Deep Star Maps 2020" Milky Way layer (bright stars removed),
     // mirrored on Wikimedia Commons because svs.gsfc.nasa.gov is often unreachable.
@@ -39,6 +40,17 @@ const SOURCES = {
 }
 
 const STAR_MAG_LIMIT = 7.5
+/** Constellation index stored for stars HYG leaves unassigned. */
+const NO_CONSTELLATION = 255
+const LIGHT_YEARS_PER_PARSEC = 3.26156
+/** HYG's placeholder distance for stars without a usable parallax. */
+const UNKNOWN_DISTANCE_PC = 100000
+const GREEK = {
+  Alp: 'α', Bet: 'β', Gam: 'γ', Del: 'δ', Eps: 'ε', Zet: 'ζ', Eta: 'η', The: 'θ',
+  Iot: 'ι', Kap: 'κ', Lam: 'λ', Mu: 'μ', Nu: 'ν', Xi: 'ξ', Omi: 'ο', Pi: 'π',
+  Rho: 'ρ', Sig: 'σ', Tau: 'τ', Ups: 'υ', Phi: 'φ', Chi: 'χ', Psi: 'ψ', Ome: 'ω',
+}
+const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹'
 const HORIZON_BANDS_M = [
   [60, 600],
   [600, 1800],
@@ -120,7 +132,16 @@ function readConstellations(index) {
   }))
 }
 
-function buildStars(hygPath, requiredHip) {
+/** Bayer letter or Flamsteed number with the constellation, e.g. "α¹ Cen" or "58 Ori". */
+function designation(bayer, flamsteed, con) {
+  if (bayer) {
+    const [letter, component] = bayer.split('-')
+    return `${GREEK[letter]}${component ? SUPERSCRIPT[component] : ''} ${con}`
+  }
+  return flamsteed ? `${flamsteed} ${con}` : ''
+}
+
+function buildStars(hygPath, requiredHip, constellationIds) {
   const lines = gunzipSync(readFileSync(hygPath)).toString('utf8').split('\n')
   const header = parseCsvLine(lines[0])
   const col = Object.fromEntries(header.map((name, i) => [name, i]))
@@ -133,12 +154,19 @@ function buildStars(hygPath, requiredHip) {
     const mag = Number(f[col.mag])
     if (f[col.proper] === 'Sol' || !Number.isFinite(mag)) continue
     if (mag > STAR_MAG_LIMIT && !(hip && requiredHip.has(hip))) continue
+    const parsecs = Number(f[col.dist])
+    const knownDistance = parsecs > 0 && parsecs < UNKNOWN_DISTANCE_PC
     const star = {
       hip: hip || 0,
       ra: (Number(f[col.ra]) * Math.PI) / 12,
       dec: (Number(f[col.dec]) * Math.PI) / 180,
       mag,
       bv: f[col.ci] === '' ? 0.6 : Number(f[col.ci]),
+      con: constellationIds.get(f[col.con]) ?? NO_CONSTELLATION,
+      designation: designation(f[col.bayer], f[col.flam], f[col.con]),
+      spectrum: f[col.spect],
+      lightYears: knownDistance ? Number((parsecs * LIGHT_YEARS_PER_PARSEC).toPrecision(3)) : 0,
+      luminosity: knownDistance ? Number(Number(f[col.lum]).toPrecision(2)) : 0,
     }
     // HYG lists some Hipparcos components twice; keep the brighter entry.
     if (star.hip) {
@@ -152,29 +180,58 @@ function buildStars(hygPath, requiredHip) {
 
   const stars = [...byHip.values()].sort((a, b) => a.mag - b.mag)
   const n = stars.length
-  const buffer = new ArrayBuffer(4 + n * 4 * 5)
+  const buffer = new ArrayBuffer(4 + n * 4 * 5 + n)
   new Uint32Array(buffer, 0, 1)[0] = n
   const ra = new Float32Array(buffer, 4, n)
   const dec = new Float32Array(buffer, 4 + n * 4, n)
   const mag = new Float32Array(buffer, 4 + n * 8, n)
   const bv = new Float32Array(buffer, 4 + n * 12, n)
   const hip = new Int32Array(buffer, 4 + n * 16, n)
+  const con = new Uint8Array(buffer, 4 + n * 20, n)
   stars.forEach((s, i) => {
     ra[i] = s.ra
     dec[i] = s.dec
     mag[i] = s.mag
     bv[i] = s.bv
     hip[i] = s.hip
+    con[i] = s.con
   })
   writeFileSync(join(outDir, 'stars.bin'), Buffer.from(buffer))
+  // Card details, in stars.bin order; loaded only once the sky is up.
+  writeFileSync(
+    join(outDir, 'star-details.json'),
+    JSON.stringify({
+      designation: stars.map((s) => s.designation),
+      spectrum: stars.map((s) => s.spectrum),
+      lightYears: stars.map((s) => s.lightYears),
+      luminosity: stars.map((s) => s.luminosity),
+    }),
+  )
 
   const missing = [...requiredHip].filter((h) => !byHip.has(h))
   console.log(`stars: ${n} (mag <= ${STAR_MAG_LIMIT} plus figure stars), missing figure stars: ${missing.length}`)
   return byHip
 }
 
-function buildConstellationData(index, starsByHip) {
-  const constellations = readConstellations(index)
+/** Stellarium's per-constellation notes, keyed by English name, as plain-text paragraphs. */
+function readDescriptions(markdown) {
+  const section = markdown.split(/^## Constellations$/m)[1].split(/^## /m)[0]
+  const descriptions = new Map()
+  for (const block of section.split(/^##### /m).slice(1)) {
+    const [heading, ...body] = block.split('\n')
+    const paragraphs = body
+      .join('\n')
+      .split(/\n\s*\n/)
+      .map((p) => p.replace(/[_*]/g, '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+    descriptions.set(heading.trim(), paragraphs.join('\n\n'))
+  }
+  return descriptions
+}
+
+function buildConstellationData(index, descriptionMarkdown, starsByHip) {
+  const descriptions = readDescriptions(descriptionMarkdown)
+  const constellations = readConstellations(index).map((c) => ({ ...c, description: descriptions.get(c.english) }))
   const starNames = {}
   for (const [key, names] of Object.entries(index.common_names)) {
     const hip = Number(key.replace(/^HIP /, ''))
@@ -228,19 +285,22 @@ async function main() {
   mkdirSync(outDir, { recursive: true })
   const hygPath = await download(SOURCES.hyg.url, SOURCES.hyg.file)
   const indexPath = await download(SOURCES.stellariumIndex.url, SOURCES.stellariumIndex.file)
+  const descriptionPath = await download(SOURCES.stellariumDescription.url, SOURCES.stellariumDescription.file)
   const milkyWayPath = await download(SOURCES.milkyWay.url, SOURCES.milkyWay.file)
   const index = JSON.parse(readFileSync(indexPath, 'utf8'))
   await ensureIllustrations(index)
   const terrainDir = await ensureTerrainTiles()
 
   const requiredHip = new Set()
-  for (const c of readConstellations(index)) {
+  const constellationIds = new Map()
+  readConstellations(index).forEach((c, i) => {
+    constellationIds.set(c.id, i)
     c.lines.flat().forEach((hip) => requiredHip.add(hip))
     c.image?.anchors.forEach((a) => requiredHip.add(a.hip))
-  }
+  })
 
-  const starsByHip = buildStars(hygPath, requiredHip)
-  buildConstellationData(index, starsByHip)
+  const starsByHip = buildStars(hygPath, requiredHip, constellationIds)
+  buildConstellationData(index, readFileSync(descriptionPath, 'utf8'), starsByHip)
   copyFileSync(milkyWayPath, join(outDir, 'milkyway.jpg'))
   buildHorizon(terrainDir)
 }

@@ -26,8 +26,7 @@ import {
   type BodyState,
   type Observer,
 } from './astro'
-import type { SkyData } from './data'
-import { skyAsset } from './data'
+import { loadStarDetails, skyAsset, type SkyData, type StarDetails } from './data'
 import { LabelLayer, type Label } from './labels'
 import { createBackground } from './layers/background'
 import { createBodies } from './layers/bodies'
@@ -41,6 +40,16 @@ import { createMeteors } from './layers/meteors'
 import { createNameConstellation, framePoint, type SkyFrame } from './layers/nameConstellation'
 import { createStars } from './layers/stars'
 import { GLYPH_HEIGHT, layoutName } from './nameGlyphs'
+import { poyaOn } from './poya'
+import { drawPoyaWish, type WishRect } from './poyaWish'
+import {
+  bodySelection,
+  constellationSelection,
+  starSelection,
+  type Selection,
+  type SelectionTarget,
+  type Sighting,
+} from './skyFacts'
 import { presetTime, type TimePreset } from './time'
 
 export type LayerKey =
@@ -55,16 +64,6 @@ export type LayerKey =
   | 'labels'
 
 export type LayerState = Record<LayerKey, boolean>
-
-export type Selection = {
-  name: string
-  kind: string
-  mag: number
-  az: number
-  alt: number
-  ra: number
-  dec: number
-}
 
 export type PointingStatus = 'waiting' | 'searching' | 'found' | 'hidden'
 
@@ -105,6 +104,8 @@ export type Dedication = {
   celebration: { title: string; caption: string }
   /** Lines written into the landing sky, above the name. */
   verses: string[]
+  /** Written around the full Moon on Poya days. */
+  poyaWishes: string[]
 }
 
 type Flight = {
@@ -124,6 +125,12 @@ const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t 
 const DEG = Math.PI / 180
 const MIN_FOV = 2
 const MAX_FOV = 150
+/** Fields of view that frame a selection when looking closer; figures are fitted instead. */
+const CLOSE_UP_FOV = { star: 14, planet: 6, disc: 3 }
+/** Radius of the ring drawn around the Poya moon. */
+const POYA_RING = 7 * DEG
+/** Degrees the Poya view sits below the Moon, leaving room for the wishes above it. */
+const POYA_VIEW_DROP = 5
 const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 const BODY_NAMES: Record<BodyId, string> = {
   Sun: 'Sun',
@@ -134,8 +141,6 @@ const BODY_NAMES: Record<BodyId, string> = {
   Jupiter: 'Jupiter',
   Saturn: 'Saturn',
 }
-
-type SelectionTarget = { kind: 'star'; index: number } | { kind: 'body'; id: BodyId }
 
 export class SkyEngine {
   onInfo?: (info: SkyInfo) => void
@@ -177,7 +182,7 @@ export class SkyEngine {
   private lineMeshes: ReturnType<typeof createAzimuthalGrid>[]
   private starIndexByHip = new Map<number, number>()
   private namedStars: { index: number; name: string }[] = []
-  private starConstellation = new Map<number, string>()
+  private starDetails: StarDetails | null = null
 
   private layers: LayerState = {
     name: true,
@@ -211,6 +216,8 @@ export class SkyEngine {
   private bodyStates: BodyState[] = []
   private overlayFade = 1
   private selection: SelectionTarget | null = null
+  /** When the Poya wishes began playing, in performance.now() time. */
+  private poyaWishStart = -Infinity
   private resizeObserver: ResizeObserver
   private exploring = false
   private dedication: Dedication | null = null
@@ -273,9 +280,10 @@ export class SkyEngine {
       if (index !== undefined) this.namedStars.push({ index, name })
     }
     this.namedStars.sort((a, b) => stars.mag[a.index] - stars.mag[b.index])
-    for (const c of data.constellations) {
-      c.lines.flat().forEach((hip) => this.starConstellation.set(hip, c.name))
-    }
+    loadStarDetails().then((details) => {
+      this.starDetails = details
+      this.emitInfo(true)
+    })
 
     this.background = createBackground(milkyWay)
     this.stars = createStars(stars)
@@ -355,6 +363,13 @@ export class SkyEngine {
     this.lookAt(az, alt, fov)
     // this.flyTo(az, alt, fov, { duration: prelude * 1000, swell: 10 })
     this.nextMeteorAt = this.nameRevealStart
+  }
+
+  /** Turns to the full Moon and writes the Poya wishes around it as the camera arrives. */
+  presentPoya(fov: number) {
+    const { az, alt } = worldToAzAlt(this.bodyStates[1].world)
+    this.flyTo(az, alt - POYA_VIEW_DROP, fov)
+    this.poyaWishStart = performance.now() + this.flight!.duration
   }
 
   /** Turns to the name, then sends a wave of light and a few meteors through it. */
@@ -550,12 +565,23 @@ export class SkyEngine {
     this.fov = Math.min(MAX_FOV, Math.max(MIN_FOV, this.fov * factor))
   }
 
-  clearSelection() {
-    this.selection = null
+  /** Selecting the Moon replays the Poya wishes. */
+  select(target: SelectionTarget | null) {
+    this.selection = target
+    if (target?.kind === 'body' && target.id === 'Moon') this.poyaWishStart = performance.now()
     this.emitInfo(true)
   }
 
+  /** Turns to the selection and zooms in to frame it. */
+  lookCloser() {
+    const target = this.selection
+    if (!target) return
+    const { az, alt } = worldToAzAlt(this.targetEqj(target).applyMatrix3(this.toWorld3))
+    this.flyTo(az, alt, Math.min(this.fov, this.closeUpFov(target)))
+  }
+
   dispose() {
+    this.onInfo = undefined
     cancelAnimationFrame(this.frameId)
     this.resizeObserver.disconnect()
     const canvas = this.renderer.domElement
@@ -584,9 +610,12 @@ export class SkyEngine {
 
   private starVector(hip: number) {
     const i = this.starIndexByHip.get(hip)
-    if (i === undefined) return null
+    return i === undefined ? null : this.starEqj(i)
+  }
+
+  private starEqj(index: number) {
     const p = this.stars.positions
-    return new Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2])
+    return new Vector3(p[index * 3], p[index * 3 + 1], p[index * 3 + 2])
   }
 
   /** Points every material at the engine-wide uniform objects. */
@@ -663,7 +692,9 @@ export class SkyEngine {
     const tapThreshold = e.pointerType === 'touch' ? 8 : 4
     if (this.exploring && p && !wasPinch && this.dragDistance < tapThreshold) {
       const rect = this.renderer.domElement.getBoundingClientRect()
-      this.pick(p.x - rect.left, p.y - rect.top)
+      const x = p.x - rect.left
+      const y = p.y - rect.top
+      this.select(this.objectAt(x, y) ?? this.constellationUnder(x, y))
     }
   }
 
@@ -702,7 +733,8 @@ export class SkyEngine {
 
   // ----- projection -------------------------------------------------------
 
-  private project(world: Vector3, out: Vector2) {
+  /** Screen position of a world direction; false only when it lies behind the view. */
+  private projectUnclipped(world: Vector3, out: Vector2) {
     const v = this.tmp.copy(world).applyMatrix3(this.viewRot)
     const len = v.length()
     const dz = v.z / len
@@ -712,7 +744,17 @@ export class SkyEngine {
       ((v.x / len) * k / this.shared.uAspect.value + 1) * 0.5 * this.width,
       (1 - (v.y / len) * k) * 0.5 * this.height,
     )
-    return out.x > -60 && out.x < this.width + 60 && out.y > -30 && out.y < this.height + 30
+    return true
+  }
+
+  private project(world: Vector3, out: Vector2) {
+    return (
+      this.projectUnclipped(world, out) &&
+      out.x > -60 &&
+      out.x < this.width + 60 &&
+      out.y > -30 &&
+      out.y < this.height + 30
+    )
   }
 
   private tmp = new Vector3()
@@ -731,7 +773,8 @@ export class SkyEngine {
     return out.set(p[index * 3], p[index * 3 + 1], p[index * 3 + 2]).applyMatrix3(this.toWorld3)
   }
 
-  private pick(x: number, y: number) {
+  /** The star, planet, Sun or Moon under a screen point. */
+  private objectAt(x: number, y: number): SelectionTarget | null {
     let best: SelectionTarget | null = null
     let bestDist = 16
     const consider = (world: Vector3, target: SelectionTarget, bonus = 0) => {
@@ -751,49 +794,82 @@ export class SkyEngine {
     for (let i = 0; i < this.data.stars.count && mag[i] < limit; i++) {
       consider(this.starWorld(i, this.tmp2), { kind: 'star', index: i }, Math.max(0, 3 - mag[i]))
     }
-    this.selection = best
-    this.emitInfo(true)
+    return best
+  }
+
+  /** The constellation under a point of open sky, while the figures are shown. */
+  private constellationUnder(x: number, y: number): SelectionTarget | null {
+    if (!this.layers.constellations && !this.layers.art) return null
+    const world = this.unproject(x / this.width, y / this.height)
+    if (this.hiddenByLandscape(world)) return null
+    return { kind: 'constellation', index: this.constellationAt(world.applyMatrix3(this.toWorld3.clone().transpose())) }
+  }
+
+  /** The constellation around a J2000 direction: the one its nearest catalogue star lies in. */
+  private constellationAt(eqj: Vector3) {
+    const p = this.stars.positions
+    let nearest = 0
+    let nearestDot = -2
+    for (let i = 0; i < this.data.stars.count; i++) {
+      const dot = p[i * 3] * eqj.x + p[i * 3 + 1] * eqj.y + p[i * 3 + 2] * eqj.z
+      if (dot > nearestDot) {
+        nearestDot = dot
+        nearest = i
+      }
+    }
+    return this.data.stars.con[nearest]
+  }
+
+  private constellationCenter(index: number) {
+    const { id } = this.data.constellations[index]
+    return this.constellations.labels.find((label) => label.id === id)!.center.clone()
+  }
+
+  /** A new J2000 direction vector for the target. */
+  private targetEqj(target: SelectionTarget) {
+    if (target.kind === 'star') return this.starEqj(target.index)
+    if (target.kind === 'constellation') return this.constellationCenter(target.index)
+    return this.bodyStates.find((b) => b.id === target.id)!.eqj.clone()
+  }
+
+  private closeUpFov(target: SelectionTarget) {
+    if (target.kind === 'star') return CLOSE_UP_FOV.star
+    if (target.kind === 'body') return target.id === 'Sun' || target.id === 'Moon' ? CLOSE_UP_FOV.disc : CLOSE_UP_FOV.planet
+    const center = this.constellationCenter(target.index)
+    const figure = this.data.constellations[target.index].lines.flat().flatMap((hip) => this.starVector(hip) ?? [])
+    // Twice the figure's angular radius, with a margin around it.
+    return (2.6 * Math.max(...figure.map((star) => center.angleTo(star)))) / DEG
+  }
+
+  /** Where a J2000 direction stands in this sky now. */
+  private sighting(eqj: Vector3): Sighting {
+    const world = eqj.clone().applyMatrix3(this.toWorld3)
+    return {
+      ...worldToAzAlt(world),
+      hidden: this.hiddenByLandscape(world),
+      ra: ((Math.atan2(eqj.y, eqj.x) / DEG + 360) % 360) / 15,
+      dec: Math.asin(eqj.z) / DEG,
+    }
   }
 
   private describeSelection(): Selection | null {
     const target = this.selection
     if (!target) return null
-    let world: Vector3
-    let eqj: Vector3
-    let name: string
-    let kind: string
-    let mag: number
-    if (target.kind === 'body') {
-      const body = this.bodyStates.find((b) => b.id === target.id)
-      if (!body) return null
-      world = body.world
-      eqj = body.eqj
-      name = BODY_NAMES[body.id]
-      kind = body.id === 'Sun' ? 'Star' : body.id === 'Moon' ? `Moon · ${Math.round(body.phase * 100)}% lit` : 'Planet'
-      mag = body.mag
-    } else {
-      const { stars, starNames } = this.data
-      const i = target.index
-      const hip = stars.hip[i]
-      const p = this.stars.positions
-      eqj = new Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2])
-      world = this.starWorld(i, new Vector3())
-      name = starNames[hip] ?? (hip ? `HIP ${hip}` : 'Star')
-      const constellation = this.starConstellation.get(hip)
-      kind = constellation ? `Star in ${constellation}` : 'Star'
-      mag = stars.mag[i]
+    const date = new Date(this.simTime)
+    const sighting = this.sighting(this.targetEqj(target))
+    if (target.kind === 'star') return starSelection(target.index, this.data, this.starDetails, sighting, date)
+    if (target.kind === 'constellation') {
+      return constellationSelection(target.index, this.data, this.starDetails, sighting, date)
     }
-    const { az, alt } = worldToAzAlt(world)
-    const ra = ((Math.atan2(eqj.y, eqj.x) / DEG + 360) % 360) / 15
-    const dec = Math.asin(eqj.z) / DEG
-    return { name, kind, mag, az, alt, ra, dec }
+    const body = this.bodyStates.find((b) => b.id === target.id)!
+    return bodySelection(body, this.constellationAt(body.eqj), sighting, this.data, this.observer, date)
   }
 
+  /** Where the selection marker goes; a constellation is traced instead. */
   private selectionWorld() {
     const target = this.selection
-    if (!target) return null
-    if (target.kind === 'body') return this.bodyStates.find((b) => b.id === target.id)?.world ?? null
-    return this.starWorld(target.index, new Vector3())
+    if (!target || target.kind === 'constellation') return null
+    return this.targetEqj(target).applyMatrix3(this.toWorld3)
   }
 
   // ----- frame ------------------------------------------------------------
@@ -1160,12 +1236,60 @@ export class SkyEngine {
     const markerPoint = marker && this.project(marker, this.screen) ? this.screen.clone() : null
     this.updateNameVisibility()
     this.updatePointingStatus()
-    this.labelLayer.draw(labels, markerPoint, (ctx) => [
-      // ...this.drawCountdown(ctx),
-      // ...this.drawSkyQuote(ctx),
-      // ...this.drawVerses(ctx),
-      ...this.drawPointingArrow(ctx),
-    ])
+    this.labelLayer.draw(labels, markerPoint, (ctx) => {
+      this.drawSelectedFigure(ctx)
+      return [
+        // ...this.drawCountdown(ctx),
+        // ...this.drawSkyQuote(ctx),
+        // ...this.drawVerses(ctx),
+        ...this.drawPoya(ctx),
+        ...this.drawPointingArrow(ctx),
+      ]
+    })
+  }
+
+  /** Traces the selected constellation's figure in gold. */
+  private drawSelectedFigure(ctx: CanvasRenderingContext2D) {
+    const target = this.selection
+    if (target?.kind !== 'constellation') return
+    ctx.save()
+    ctx.strokeStyle = 'rgba(255, 214, 140, 0.8)'
+    ctx.lineWidth = 1.6
+    ctx.shadowColor = 'rgba(255, 200, 120, 0.85)'
+    ctx.shadowBlur = 8
+    ctx.beginPath()
+    for (const line of this.data.constellations[target.index].lines) {
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = this.starVector(line[i])?.applyMatrix3(this.toWorld3)
+        const b = this.starVector(line[i + 1])?.applyMatrix3(this.toWorld3)
+        if (!a || !b || this.hiddenByLandscape(a) || this.hiddenByLandscape(b)) continue
+        if (!this.projectUnclipped(a, this.screen) || !this.projectUnclipped(b, this.tmpScreen)) continue
+        ctx.moveTo(this.screen.x, this.screen.y)
+        ctx.lineTo(this.tmpScreen.x, this.tmpScreen.y)
+      }
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  /** On a Poya day: a ring around the full Moon, its Poya's name, and the wishes while they play. */
+  private drawPoya(ctx: CanvasRenderingContext2D): WishRect[] {
+    const poya = poyaOn(new Date(this.simTime))
+    const moon = this.bodyStates[1].world
+    if (!poya || this.hiddenByLandscape(moon) || !this.project(moon, this.screen)) return []
+    const { x, y } = this.screen
+    const up = new Vector3(0, 1, 0).addScaledVector(moon, -moon.y).normalize()
+    const edge = moon.clone().multiplyScalar(Math.cos(POYA_RING)).addScaledVector(up, Math.sin(POYA_RING))
+    if (!this.projectUnclipped(edge, this.tmpScreen)) return []
+    return drawPoyaWish(
+      ctx,
+      x,
+      y,
+      Math.hypot(this.tmpScreen.x - x, this.tmpScreen.y - y),
+      `${poya.name} Poya`,
+      this.dedication?.poyaWishes ?? [],
+      (performance.now() - this.poyaWishStart) / 1000,
+    )
   }
 
   /** Whether the name is hidden, still being looked for, or right in front of the phone. */

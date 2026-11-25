@@ -5,6 +5,17 @@ export type StarCatalog = {
   mag: Float32Array
   bv: Float32Array
   hip: Int32Array
+  /** Index into `SkyData.constellations` of the IAU constellation each star lies in. */
+  con: Uint8Array
+}
+
+/** Per-star facts for the selection card, in catalogue order. Unknown distances are 0. */
+export type StarDetails = {
+  designation: string[]
+  spectrum: string[]
+  lightYears: number[]
+  /** Times the Sun's luminosity. */
+  luminosity: number[]
 }
 
 export type ConstellationArt = {
@@ -19,6 +30,8 @@ export type Constellation = {
   english: string
   lines: number[][]
   image: ConstellationArt | null
+  /** Story and highlights, paragraphs separated by blank lines. */
+  description: string
 }
 
 export type HorizonData = {
@@ -53,6 +66,7 @@ function parseStars(buffer: ArrayBuffer): StarCatalog {
     mag: new Float32Array(buffer, 4 + count * 8, count),
     bv: new Float32Array(buffer, 4 + count * 12, count),
     hip: new Int32Array(buffer, 4 + count * 16, count),
+    con: new Uint8Array(buffer, 4 + count * 20, count),
   }
 }
 
@@ -68,4 +82,8 @@ export async function loadSkyData(): Promise<SkyData> {
     starNames: constellationData.starNames,
     horizon,
   }
+}
+
+export async function loadStarDetails(): Promise<StarDetails> {
+  return (await fetchOk('star-details.json')).json()
 }

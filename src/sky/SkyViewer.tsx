@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { loadSkyData } from './data'
 import {
   canFollowDevice,
@@ -9,6 +9,7 @@ import {
 } from './deviceAttitude'
 import { HOLD_UP_ICON, LAYER_ICONS } from './icons'
 import { OBSERVER } from './observer'
+import { poyaOn } from './poya'
 import {
   SkyEngine,
   type Dedication,
@@ -16,6 +17,7 @@ import {
   type LayerState,
   type SkyInfo,
 } from './SkyEngine'
+import { compassPoint, heightInSky, type Selection } from './skyFacts'
 import {
   formatLocalDate,
   formatLocalTime,
@@ -72,21 +74,12 @@ const PRESET_VIEWS: Record<Preset, [number, number] | null> = {
   dawn: null,
   morning: null,
   night: [196, 38],
+  poya: null,
   now: null,
 }
 
 /** Vertical field of view; portrait screens need more to show a useful width. */
 const defaultFov = () => (window.innerWidth / window.innerHeight < 0.9 ? 125 : 100)
-
-function formatRa(hours: number) {
-  const h = Math.floor(hours)
-  const m = Math.round((hours - h) * 60)
-  return `${h}h ${String(m % 60).padStart(2, '0')}m`
-}
-
-function formatSigned(deg: number) {
-  return `${deg >= 0 ? '+' : '−'}${Math.abs(deg).toFixed(1)}°`
-}
 
 function pointingProblem(kind: Exclude<AttitudeStart, 'ready'>) {
   switch (kind) {
@@ -99,30 +92,76 @@ function pointingProblem(kind: Exclude<AttitudeStart, 'ready'>) {
   }
 }
 
-const COMPASS_POINTS = [
-  'north', 'north-northeast', 'northeast', 'east-northeast',
-  'east', 'east-southeast', 'southeast', 'south-southeast',
-  'south', 'south-southwest', 'southwest', 'west-southwest',
-  'west', 'west-northwest', 'northwest', 'north-northwest',
-]
+/** Turns to the Poya moon, framed tighter than the open sky. It waits a frame for the Moon at the new time. */
+const presentPoya = (engine: SkyEngine) => requestAnimationFrame(() => engine.presentPoya(defaultFov() / 2))
 
-const compassPoint = (az: number) => COMPASS_POINTS[Math.round((((az % 360) + 360) % 360) / 22.5) % 16]
-
-function heightInSky(alt: number) {
-  if (alt < 12) return 'just above the horizon'
-  if (alt < 30) return 'low in the sky'
-  if (alt < 55) return 'about halfway up the sky'
-  if (alt < 75) return 'high in the sky'
-  return 'almost straight overhead'
+/** `?date=yyyy-mm-dd` opens the sky on that day instead of today, to preview a Poya day. */
+function openingDate() {
+  const date = new URLSearchParams(window.location.search).get('date')
+  return date ? withLocalDate(new Date(), date) : new Date()
 }
 
-/** Tonight's sky, with the explore controls already open. */
-function showMainSky(engine: SkyEngine) {
+/** Tonight's sky, with the explore controls already open. On a Poya day it turns to the full Moon. */
+function showMainSky(engine: SkyEngine): Preset {
   const [az, alt] = PRESET_VIEWS.night!
+  const day = openingDate()
+  const preset = poyaOn(day) ? 'poya' : 'night'
+  engine.setTime(day)
   engine.setExploring(true)
-  engine.applyPreset('night')
+  engine.applyPreset(preset)
   engine.setSpeed(1)
   engine.lookAt(az, alt, defaultFov())
+  if (preset === 'poya') presentPoya(engine)
+  return preset
+}
+
+function SelectionCard({ selection, engine }: { selection: Selection; engine: SkyEngine }) {
+  const { name, kind, constellation, about, facts } = selection
+  return (
+    <aside className="sky-selection" aria-live="polite">
+      <button className="sky-selection__close" onClick={() => engine.select(null)} aria-label="Close">
+        ×
+      </button>
+      <h2>{name}</h2>
+      <p className="sky-selection__kind">
+        {kind}
+        {constellation && (
+          <>
+            {' in '}
+            <button className="sky-selection__link" onClick={() => engine.select(constellation.target)}>
+              {constellation.name}
+            </button>
+          </>
+        )}
+      </p>
+      <div className="sky-selection__body">
+        <dl>
+          {facts.map(({ label, value, target }) => (
+            <Fragment key={label}>
+              <dt>{label}</dt>
+              <dd>
+                {target ? (
+                  <button className="sky-selection__link" onClick={() => engine.select(target)}>
+                    {value}
+                  </button>
+                ) : (
+                  value
+                )}
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+        {about.map((paragraph) => (
+          <p key={paragraph} className="sky-selection__about">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+      <button className="sky-back sky-selection__closer" onClick={() => engine.lookCloser()}>
+        Look closer
+      </button>
+    </aside>
+  )
 }
 
 type SkyViewerProps = {
@@ -162,7 +201,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         created.onInfo = setInfo
         created.setLayers(DEFAULT_LAYERS)
         created.setDedication(dedication)
-        showMainSky(created)
+        setPreset(showMainSky(created))
         setEngine(created)
         setStatus('ready')
       })
@@ -189,6 +228,8 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
   }, [notice])
 
   const time = info?.time ?? new Date()
+  const poya = poyaOn(time)
+  const presets: [Preset, string][] = poya ? [...PRESETS, ['poya', `${poya.name} Poya`]] : PRESETS
   const viewWhere = info
     ? `${compassPoint(info.az)}, ${info.alt < 0 ? 'below the horizon' : heightInSky(info.alt)}`
     : 'Finding north…'
@@ -198,6 +239,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
     engine.applyPreset(next)
     const view = PRESET_VIEWS[next]
     if (view) engine.lookAt(...view, defaultFov())
+    else if (next === 'poya') presentPoya(engine)
     else if (next !== 'now') requestAnimationFrame(() => engine.lookAtSky(defaultFov() + 10))
     setPreset(next)
   }
@@ -242,9 +284,8 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
       releasePhone()
       engine.stopFollowingDevice()
       setPointing('off')
-      setPreset('night')
       setShowCredits(false)
-      showMainSky(engine)
+      setPreset(showMainSky(engine))
       setExploring(true)
       setCurtain(false)
     }, 380)
@@ -294,27 +335,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         </div>
       )}
 
-      {info?.selection && !heldUp && (
-        <aside className="sky-selection" aria-live="polite">
-          <button className="sky-selection__close" onClick={() => engine?.clearSelection()} aria-label="Close">
-            ×
-          </button>
-          <h2>{info.selection.name}</h2>
-          <p className="sky-selection__kind">{info.selection.kind}</p>
-          <dl>
-            <dt>Magnitude</dt>
-            <dd>{info.selection.mag.toFixed(2)}</dd>
-            <dt>Az / Alt</dt>
-            <dd>
-              {info.selection.az.toFixed(1)}° / {formatSigned(info.selection.alt)}
-            </dd>
-            <dt>RA / Dec</dt>
-            <dd>
-              {formatRa(info.selection.ra)} / {formatSigned(info.selection.dec)}
-            </dd>
-          </dl>
-        </aside>
-      )}
+      {info?.selection && engine && !heldUp && <SelectionCard selection={info.selection} engine={engine} />}
 
       {status === 'ready' && exploring && !heldUp && (
         <footer className="sky-dock">
@@ -353,7 +374,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
               <span>{formatLocalDate(time)}</span>
             </div>
             <div className="sky-time__presets" role="group" aria-label="Time presets">
-              {PRESETS.map(([key, label]) => (
+              {presets.map(([key, label]) => (
                 <button key={key} className={preset === key ? 'is-on' : ''} onClick={() => choosePreset(key)}>
                   {label}
                 </button>
@@ -410,7 +431,7 @@ export function SkyViewer({ dedication }: SkyViewerProps) {
         <div className="sky-credits" role="dialog" aria-label="Data credits">
           <p>
             Stars: <a href="https://codeberg.org/astronexus/hyg">HYG Database v4.4</a> (CC BY-SA 4.0). Constellation
-            lines and names: <a href="https://github.com/Stellarium/stellarium">Stellarium</a> (CC BY-SA 4.0).
+            lines, names and stories: <a href="https://github.com/Stellarium/stellarium">Stellarium</a> (CC BY-SA 4.0).
             Constellation art: <a href="https://johanmeuris.eu/work/stellarium-constellation-art/">Johan Meuris</a>{' '}
             (Free Art License). Milky Way: <a href="https://svs.gsfc.nasa.gov/4851">NASA/Goddard SVS Deep Star Maps 2020</a>,
             Gaia DR2 ESA/Gaia/DPAC. Moon: Gregory H. Revera (CC BY-SA 3.0). Terrain around IIT Mandi:{' '}

@@ -55,10 +55,12 @@ export type BodyState = {
   radius: number
   /** Illuminated fraction of the disc (Moon and planets). */
   phase: number
+  /** Distance from the observer in AU. */
+  dist: number
 }
 
 const BODY_IDS: BodyId[] = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn']
-const AU_KM = 149597870.7
+export const AU_KM = 149597870.7
 const RADIUS_KM: Partial<Record<BodyId, number>> = { Sun: 695700, Moon: 1737.4 }
 
 export function computeBodies(date: Date, observer: Observer, toWorld: Matrix4): BodyState[] {
@@ -76,6 +78,7 @@ export function computeBodies(date: Date, observer: Observer, toWorld: Matrix4):
       mag: illumination ? illumination.mag : -26.7,
       radius: radiusKm ? Math.asin(radiusKm / (eq.dist * AU_KM)) : 0,
       phase: illumination ? illumination.phase_fraction : 1,
+      dist: eq.dist,
     }
   })
 }

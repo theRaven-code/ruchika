@@ -18,7 +18,13 @@ const dedication: Dedication = {
     "Now you find me counting the stars,",
     "For I've got nothing better to do but, ",
     "wait for your stars to align with mine",
-    "counting every second until your birthday", 
+    "counting every second until your birthday",
+  ],
+  poyaWishes: [
+    'Happy Poya, Ruchika',
+    'May your fast be gentle, and your mind as still as this moon',
+    "Rest when you're tired. I'll keep watch with the moon tonight",
+    "Every full moon, I'm thinking of you",
   ],
   countdown: () => {
     const state = getBirthdayState()

@@ -5,7 +5,10 @@ import { OBSERVER } from './observer'
 const OFFSET_MS = OBSERVER.utcOffsetMinutes * 60_000
 const HOUR_MS = 3_600_000
 
-export type TimePreset = 'dawn' | 'morning' | 'night'
+export type TimePreset = 'dawn' | 'morning' | 'night' | 'poya'
+
+/** Degrees the Moon must stand above the ridges for its Poya ring to clear them. */
+const MOON_CLEARANCE = 9
 
 function shifted(date: Date) {
   return new Date(date.getTime() + OFFSET_MS)
@@ -88,11 +91,23 @@ function darkestNight(midnight: Date, observer: Observer) {
   return best
 }
 
+/** The first moment of the evening when the Moon stands clear of the ridges after dusk. */
+function moonlitEvening(midnight: Date, observer: Observer, ridgeAltitude: (azDeg: number) => number) {
+  for (let h = 16; h <= 30; h += 1 / 6) {
+    const t = new Date(midnight.getTime() + h * HOUR_MS)
+    if (altitude(Astronomy.Body.Sun, t, observer) > -6) continue
+    const moon = azAlt(Astronomy.Body.Moon, t, observer)
+    if (moon.alt > ridgeAltitude(moon.az) + MOON_CLEARANCE) return t
+  }
+  return new Date(midnight.getTime() + 21 * HOUR_MS)
+}
+
 /**
  * Picks a moment on the local day of `date`:
  * - dawn: the Sun is 10 degrees below the horizon, stars fading into blue
  * - morning: a few minutes after the Sun first clears the surrounding ridges
  * - night: the darkest, least moonlit moment near 22:00
+ * - poya: the full moon newly clear of the ridges after dusk
  */
 export function presetTime(
   preset: TimePreset,
@@ -102,6 +117,7 @@ export function presetTime(
 ) {
   const midnight = localMidnight(date)
   if (preset === 'night') return darkestNight(midnight, observer)
+  if (preset === 'poya') return moonlitEvening(midnight, observer, ridgeAltitude)
 
   if (preset === 'dawn') {
     const t = Astronomy.SearchAltitude(Astronomy.Body.Sun, observer, +1, midnight, 1, -10)

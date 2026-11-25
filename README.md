@@ -33,7 +33,11 @@ sets like a real constellation.
 default view:
 
 - Drag to look around, scroll or pinch to zoom, arrow keys and `+`/`-` also work.
-- Click a star, planet, the Sun or the Moon to see its details.
+- Click a star, planet, the Sun or the Moon to see its details: distance, the
+  year its light left, colour and temperature, when it is highest tonight, and
+  rise and set times for the Sun and Moon. With Constellations or Constellation
+  Art on, clicking open sky picks the constellation there, traces it in gold and
+  shows its story. "Look closer" flies to the selection and zooms in.
 - Time presets: **Dawn** (Sun 10° below the horizon), **Morning** (just after
   the Sun clears the Kamand ridges), **Night** and **Now**. The slider, date
   picker and speed buttons scrub or time-lapse the sky.
@@ -57,6 +61,20 @@ Code lives in `src/sky/`:
 | `astro.ts`, `time.ts` | Coordinate frames, ephemerides, presets (IST) |
 | `shaders.ts` | Stereographic projection and the atmosphere model |
 | `layers/` | Milky Way + sky, stars, lines/grids, constellation art, Sun/Moon/planets, landscape |
+
+## Poya Days
+
+On a Poya day (the Sri Lankan full-moon day, `src/sky/poya.ts`) the sky opens
+on the evening the full Moon clears the ridges and turns to it. A faint ring
+around the Moon carries the Poya's name all day; the wishes in
+`poyaWishes` (`src/App.tsx`) are written one at a time over it when the view
+arrives, and again whenever the Moon is clicked. The time panel gains a Poya
+preset for that day.
+
+The day is computed, not listed: the last sunset at Colombo before the full
+moon, if it falls in the full-moon tithi, otherwise the full moon's own date.
+This matches the official calendar for 2024–2027. Names follow the calendar
+month, so an adhi (leap) Poya every few years takes its neighbour's name.
 
 ## Sky Data
 
